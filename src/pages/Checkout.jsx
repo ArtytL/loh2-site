@@ -1,7 +1,7 @@
 // src/pages/Checkout.jsx
 import { useState, useMemo } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = import.meta.env.VITE_API_URL|| "").trim();
 const SEND_URL  = `${API_URL.replace(/\/$/, '')}/send-order`;
 const SHIPPING = Number(import.meta.env.VITE_SHIPPING_FEE || 50);
 
