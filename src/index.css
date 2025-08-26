@@ -1,0 +1,15 @@
+/* ลบตัวคั่นจุด • ที่ถูกแทรกด้วย pseudo-element ในแถบเมนู */
+#top-nav,
+#top-nav ul { list-style: none; margin: 0; padding: 0; }
+
+/* บางธีมจะทำ a + a::before หรือ li + li::before ให้เป็น •  */
+#top-nav a + a::before,
+#top-nav li + li::before {
+  content: "" !important;
+}
+
+/* กันเคสที่ธีมยัด content เป็น • ใส่ทุก before/after ใน nav นี้ */
+#top-nav *::before,
+#top-nav *::after {
+  content: none !important;
+}
