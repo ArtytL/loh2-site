@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL;
+const SEND_URL  = `${API_URL.replace(/\/$/, '')}/send-order`;
 const SHIPPING = Number(import.meta.env.VITE_SHIPPING_FEE || 50);
 
 // utils
