@@ -1,7 +1,9 @@
 // src/pages/Transfer.jsx
 import { useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL;
+// ต้องให้ VITE_API_URL = https://email-five-alpha.vercel.app/api
+const API_BASE = import.meta.env.VITE_API_URL;      // <= base: .../api
+const SEND_URL = `${API_BASE}/send-order`;          // <= ต่อ /send-order ตรงนี้
 const SHIP = Number(import.meta.env.VITE_SHIPPING_FEE || 50);
 
 // utils
