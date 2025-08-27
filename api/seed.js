@@ -1,16 +1,12 @@
-// api/seed.js  (โปรเจกต์ loh2-site)
-// ให้แน่ใจว่าอยู่โฟลเดอร์ api ที่ราก repo
-
-export const config = { runtime: 'nodejs18.x' }; // กันถูกตีความเป็น Edge
+// api/seed.js  (โปรเจกต์ loh2-site) — เวอร์ชันจบในไฟล์เดียว
+export const config = { runtime: 'nodejs18.x' };
 
 export default async function handler(req, res) {
   try {
-    // 1) method guard
     if (req.method !== 'POST') {
       return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
     }
 
-    // 2) optional auth by ADMIN_JWT_SECRET
     const SECRET = process.env.ADMIN_JWT_SECRET || '';
     if (SECRET) {
       const auth = req.headers.authorization || '';
@@ -20,7 +16,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3) required env for Upstash KV
     const API = process.env.KV_REST_API_URL;
     const TOKEN = process.env.KV_REST_API_TOKEN;
     if (!API || !TOKEN) {
@@ -30,7 +25,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4) สินค้าตัวอย่าง (ใส่เท่าที่ต้องการ)
     const products = [
       {
         id: 'DVD-001',
@@ -64,13 +58,11 @@ export default async function handler(req, res) {
         youtube: 'https://www.youtube.com/watch?v=o-YBDTqX_ZU',
         detail: 'คำอธิบายสินค้าบลูเรย์ตัวอย่าง',
       },
-      // เพิ่มรายการอื่น ๆ ได้ตามต้องการ
     ];
 
-    // 5) helper เรียก Upstash REST
+    // helper เรียก Upstash KV REST ตรง ๆ
     const kvSet = async (key, value) => {
-      const url = `${API}/set/${encodeURIComponent(key)}`;
-      const resp = await fetch(url, {
+      const resp = await fetch(`${API}/set/${encodeURIComponent(key)}`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${TOKEN}`,
@@ -83,12 +75,10 @@ export default async function handler(req, res) {
       return data;
     };
 
-    // 6) เซ็ตทีเดียวทั้ง array (หรือจะเก็บเป็นรายชิ้นก็ได้)
     await kvSet('products', products);
 
     return res.status(200).json({ ok: true, count: products.length });
   } catch (err) {
-    // ดู error เต็ม ๆ ใน Logs ได้
     console.error('seed error:', err);
     return res.status(500).json({ ok: false, error: String(err) });
   }
