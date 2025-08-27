@@ -1,256 +1,215 @@
 // src/pages/Transfer.jsx
 import { useEffect, useState } from "react";
 
-// ต้องให้ VITE_API_URL = https://email-five-alpha.vercel.app/api
-const API_BASE = import.meta.env.VITE_API_URL;      // <= base: .../api
-const SEND_URL = `${API_BASE}/send-order`;          // <= ต่อ /send-order ตรงนี้
+// ===== CONFIG from .env =====
+// VITE_API_URL ต้องเป็นแบบมี /api ต่อท้าย เช่น https://email-five-alpha.vercel.app/api
+const API_BASE = import.meta.env.VITE_API_URL;
+const SEND_URL = `${API_BASE}/send-order`;              // endpoint ที่เราส่งจริง
 const SHIP = Number(import.meta.env.VITE_SHIPPING_FEE || 50);
 
-// utils
-const fmt = (n) =>
-  (Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 0 });
+// ===== Utils =====
+const fmt = (n) => (Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 0 }) + " บาท";
+const isEmail = (s) => typeof s === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
-const isEmail = (s) =>
-  typeof s === "string" &&
-  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+// โหลดตะกร้า (จากหน้า checkout) มาดูยอด
+function getCart() {
+  try {
+    return JSON.parse(localStorage.getItem("cart") || "[]");
+  } catch {
+    return [];
+  }
+}
 
 export default function Transfer() {
+  const [cart, setCart]   = useState([]);
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  // แบบฟอร์มแจ้งโอน
   const [form, setForm] = useState({
     orderId: "",
     name: "",
     email: "",
     phone: "",
     address: "",
-    amount: "",
+    amount: "",   // ใส่ยอดที่จะโอน (prefill จากรวมสินค้า + ค่าส่ง)
     note: "",
-    slipFile: null,
+    slipData: "", // base64 ของสลิป (ถ้ามี)
   });
-  const [sending, setSending] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
 
-  // Prefill จาก query: #/transfer?orderId=...&name=...&...
+  // ให้หน้าเพจรู้ยอดรวมจากตะกร้าปัจจุบัน
+  const subtotal = cart.reduce((s, i) => s + (Number(i.price) || 0) * (Number(i.qty) || 1), 0);
+  const grand = subtotal + SHIP;
+
   useEffect(() => {
-    window.scrollTo(0, 0);
-    const q = new URLSearchParams((location.hash.split("?")[1]) || "");
-    setForm((f) => ({
-      ...f,
-      orderId: q.get("orderId") || f.orderId,
-      name: q.get("name") || f.name,
-      email: q.get("email") || f.email,
-      phone: q.get("phone") || f.phone,
-      address: q.get("address") || f.address,
-      amount: q.get("amount") || f.amount,
-    }));
+    const c = getCart();
+    setCart(c);
+    setForm((f) => ({ ...f, amount: grand })); // prefill ยอดรวม
+    // eslint-disable-next-line
   }, []);
 
   const onChange = (e) => {
-    const { name, value, files } = e.target;
-    setForm((f) => ({ ...f, [name]: files ? files[0] : value }));
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
   };
 
-  async function fileToBase64(file) {
-    if (!file) return null;
-    const ab = await file.arrayBuffer();
-    let bin = "";
-    const bytes = new Uint8Array(ab);
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin); // base64 (ไม่ใส่ data:prefix)
-  }
+  // แปลงไฟล์แนบเป็น base64 เก็บลง state
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setForm((f) => ({ ...f, slipData: "" }));
+      return;
+    }
+    const b64 = await fileToBase64(file);
+    setForm((f) => ({ ...f, slipData: b64 }));
+  };
 
-  async function onSubmit(e) {
+  const onSubmit = async (e) => {
     e.preventDefault();
-    setErr("");
-    setMsg("");
+    setErr(""); setMsg("");
+    if (!form.orderId?.trim()) return setErr("กรุณากรอกหมายเลขออเดอร์");
+    if (!isEmail(form.email))  return setErr("อีเมลไม่ถูกต้อง");
+    if (!form.phone?.trim())   return setErr("กรุณากรอกเบอร์โทร");
+    if (!form.address?.trim()) return setErr("กรุณากรอกที่อยู่จัดส่ง");
+
+    setSending(true);
     try {
-      // validate
-      if (!form.name || !form.email || !form.phone || !form.address)
-        throw new Error("กรอกข้อมูลให้ครบก่อนน้า");
-      if (!isEmail(form.email)) throw new Error("อีเมลไม่ถูกต้อง");
-      const amount = Number(form.amount);
-      if (!amount || amount < 1) throw new Error("กรอกยอดที่โอนเป็นตัวเลข");
-
-      if (!form.slipFile) throw new Error("แนบสลิปก่อนส่งด้วยน้า");
-      const okTypes = ["image/png", "image/jpeg", "application/pdf"];
-      if (!okTypes.includes(form.slipFile.type))
-        throw new Error("สลิปต้องเป็น PNG / JPG / PDF เท่านั้น");
-      const maxSize = 8 * 1024 * 1024; // 8MB
-      if (form.slipFile.size > maxSize)
-        throw new Error("ไฟล์ใหญ่เกิน 8MB");
-
-      setSending(true);
-
-      // แปลงสลิปเป็น base64
-      const slipBase64 = await fileToBase64(form.slipFile);
-
-      // ส่งแจ้งโอน
-      // NOTE: ฝั่ง API จะ “บวกค่าส่ง” เองเสมอ
-      // ดังนั้นเราส่ง total = amount - SHIP เพื่อให้ (total + shipping) = amount ที่ลูกค้าโอนจริง
+      // รวม payload ส่งไปที่ /send-order
       const payload = {
-        mode: "transfer",
-        orderId: form.orderId || `PAY-${Date.now()}`,
+        type: "transfer",             // ให้ backend แยกเคสแจ้งโอน (ไม่มีก็ไม่พัง)
+        orderId: form.orderId,
         name: form.name,
         email: form.email,
         phone: form.phone,
         address: form.address,
-        note:
-          form.note ||
-          `ลูกค้าแจ้งโอน ${fmt(amount)} บาท (รวมค่าส่ง ${fmt(SHIP)})`,
-        cart: [],
-        total: Math.max(amount - SHIP, 0),
-        slipBase64,
+        note: form.note,
+        amount: Number(form.amount) || grand,
+        shipping: SHIP,
+        cart,                         // แนบรายการที่มีใน localStorage ไปด้วย
+        slipData: form.slipData,      // แนบสลิป (base64) ถ้ามี
       };
 
-      const res = await fetch(API_URL, {
+      const res = await fetch(SEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "ส่งแจ้งโอนไม่สำเร็จ");
-      }
-
-      setMsg("ส่งแจ้งโอนเรียบร้อย ✨ เราจะเช็กแล้วคอนเฟิร์มกลับทางอีเมลครับ/ค่ะ");
-      setForm({
-        orderId: "",
-        name: "",
-        email: "",
-        phone: "",
-        address: "",
-        amount: "",
-        note: "",
-        slipFile: null,
-      });
-      const f = document.getElementById("slipFile");
-      if (f) f.value = "";
-    } catch (e2) {
-      setErr(e2.message || String(e2));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setMsg("ส่งข้อมูลแจ้งโอนเรียบร้อยแล้วครับ ✨");
+    } catch (e) {
+      setErr(e.message || "ส่งข้อมูลไม่สำเร็จ");
     } finally {
       setSending(false);
     }
-  }
+  };
 
+  // ====== UI ======
   return (
     <div style={st.wrap}>
-      <h1 style={{ marginBottom: 8 }}>หน้าแจ้งโอน</h1>
-      <p style={{ color: "#555", marginTop: 0 }}>
-        กรอกข้อมูลและแนบสลิป จากนั้นกด <b>“ส่งแจ้งโอน”</b>
-      </p>
+      <h1 style={{ margin: "0 0 12px 0" }}>หน้าแจ้งโอน</h1>
+      <p>ถ้าอยากใช้ฟอร์มเต็มของแจ้งโอน กรอกข้อมูลให้ครบแล้วกด “ส่งแจ้งโอน” ได้เลย</p>
 
-      {/* ฟอร์มแจ้งโอน */}
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
-        <label>หมายเลขออเดอร์
-          <input
-            name="orderId"
-            value={form.orderId}
-            onChange={onChange}
-            placeholder="เช่น L2-1725..."
-            style={st.input}
-          />
-        </label>
-
-        <label>ชื่อ-นามสกุล*
-          <input
-            name="name"
-            value={form.name}
-            onChange={onChange}
-            required
-            style={st.input}
-          />
-        </label>
-
-        <label>อีเมล*
-          <input
-            name="email"
-            type="email"
-            value={form.email}
-            onChange={onChange}
-            required
-            style={st.input}
-          />
-        </label>
-
-        <label>เบอร์โทร*
-          <input
-            name="phone"
-            value={form.phone}
-            onChange={onChange}
-            required
-            style={st.input}
-          />
-        </label>
-
-        <label>ที่อยู่จัดส่ง*
-          <textarea
-            name="address"
-            rows={3}
-            value={form.address}
-            onChange={onChange}
-            required
-            style={st.textarea}
-          />
-        </label>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label>ยอดที่โอน (บาท)*
-            <input
-              name="amount"
-              type="number"
-              inputMode="numeric"
-              value={form.amount}
-              onChange={onChange}
-              required
-              style={st.input}
-            />
-          </label>
-          <label>ค่าส่ง (คงที่)
-            <input value={SHIP} disabled style={{ ...st.input, background: "#f7f7f7" }} />
-          </label>
-        </div>
-
-        <label>หมายเหตุ (ถ้ามี)
-          <input
-            name="note"
-            value={form.note}
-            onChange={onChange}
-            placeholder="ช่องทาง/เวลาโอน เพิ่มเติม"
-            style={st.input}
-          />
-        </label>
-
-        <label>แนบสลิป (PNG/JPG/PDF)*
-          <input
-            id="slipFile"
-            name="slipFile"
-            type="file"
-            accept=".png,.jpg,.jpeg,.pdf"
-            onChange={onChange}
-            required
-            style={st.input}
-          />
-        </label>
-
-        <button disabled={sending} style={st.btn}>
-          {sending ? "กำลังส่งแจ้งโอน..." : "ส่งแจ้งโอน"}
-        </button>
-
-        {err && <p style={{ margin: 0, color: "#c00" }}>ผิดพลาด: {err}</p>}
-        {msg && <p style={{ margin: 0, color: "#0a0" }}>{msg}</p>}
-      </form>
-
-      <hr style={{ margin: "24px 0" }} />
-
-      {/* Info โอน */}
+      {/* ข้อมูลบัญชี */}
       <div style={st.card}>
-        <b>บัญชีสำหรับโอน</b>
+        <div><b>บัญชีสำหรับโอน</b></div>
         <div>ธนาคาร: กรุงเทพ</div>
         <div>เลขบัญชี: 047-007-8908</div>
         <div>ชื่อบัญชี: อาทิตย์ เลิศรักษ์มงคล</div>
-        <div>ค่าส่ง: {fmt(SHIP)} บาท (เหมาจ่าย)</div>
+        <div>ค่าส่ง: {fmt(SHIP)} (เหมากล่อง)</div>
       </div>
 
+      {/* สรุปรายการสินค้า (ถ้ามีตะกร้า) */}
+      {cart.length > 0 && (
+        <div style={st.card}>
+          <div style={{ marginBottom: 6 }}><b>รายการสินค้า</b></div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {cart.map((it, i) => (
+              <li key={i}>
+                {it.title} × {it.qty} = {fmt((Number(it.price) || 0) * (Number(it.qty) || 1))}
+              </li>
+            ))}
+          </ul>
+          <div style={{ marginTop: 8 }}>รวมสินค้า: {fmt(subtotal)}</div>
+          <div>ค่าส่ง: {fmt(SHIP)}</div>
+          <div><b>รวมทั้งสิ้น: {fmt(grand)}</b></div>
+        </div>
+      )}
+
+      {/* ฟอร์มแจ้งโอน */}
+      <form onSubmit={onSubmit} style={{ marginTop: 12 }}>
+        <div><label>หมายเลขออเดอร์*</label></div>
+        <input
+          name="orderId"
+          placeholder="เช่น L2-1725..."
+          value={form.orderId}
+          onChange={onChange}
+          style={st.input}
+        />
+
+        <div><label>ชื่อ-นามสกุล*</label></div>
+        <input
+          name="name"
+          value={form.name}
+          onChange={onChange}
+          style={st.input}
+        />
+
+        <div><label>อีเมล*</label></div>
+        <input
+          name="email"
+          placeholder="you@example.com"
+          value={form.email}
+          onChange={onChange}
+          style={st.input}
+        />
+
+        <div><label>เบอร์โทร*</label></div>
+        <input
+          name="phone"
+          value={form.phone}
+          onChange={onChange}
+          style={st.input}
+        />
+
+        <div><label>ที่อยู่จัดส่ง*</label></div>
+        <textarea
+          name="address"
+          value={form.address}
+          onChange={onChange}
+          style={st.textarea}
+        />
+
+        <div><label>ยอดที่โอน (บาท)</label></div>
+        <input
+          name="amount"
+          type="number"
+          value={form.amount}
+          onChange={onChange}
+          style={st.input}
+        />
+
+        <div><label>หมายเหตุ (ถ้ามี)</label></div>
+        <textarea
+          name="note"
+          value={form.note}
+          onChange={onChange}
+          style={st.textarea}
+        />
+
+        <div><label>แนบสลิป (PNG/JPG/PDF)</label></div>
+        <input type="file" accept="image/*,application/pdf" onChange={onFile} style={{ marginBottom: 12 }} />
+
+        <button type="submit" style={st.btn} disabled={sending}>
+          {sending ? "กำลังส่งแจ้งโอน..." : "ส่งแจ้งโอน"}
+        </button>
+      </form>
+
+      {err && <p style={{ color: "#c00" }}>ผิดพลาด: {err}</p>}
+      {msg && <p style={{ color: "#0a0" }}>{msg}</p>}
+
+      <hr style={{ margin: "24px 0" }} />
       <p style={{ color: "#666" }}>
         หรือ reply อีเมลยืนยันคำสั่งซื้อพร้อมแนบสลิปก็ได้เช่นกัน
       </p>
@@ -258,10 +217,21 @@ export default function Transfer() {
   );
 }
 
+/* ===== styles ===== */
 const st = {
-  wrap: { maxWidth: 640, margin: "40px auto", padding: 16, lineHeight: 1.6 },
-  input: { width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 8 },
-  textarea: { width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 8 },
-  btn: { padding: "12px 16px", borderRadius: 8, background: "#111", color: "#fff", border: 0, cursor: "pointer" },
-  card: { border: "1px solid #eee", borderRadius: 12, padding: 16, background: "#fff" },
+  wrap:  { maxWidth: 640, margin: "40px auto", padding: 16, lineHeight: 1.6 },
+  input: { width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 8, marginBottom: 10 },
+  textarea: { width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 8, minHeight: 96, marginBottom: 10 },
+  btn:   { padding: "12px 16px", borderRadius: 8, background: "#111", color: "#fff", border: 0, cursor: "pointer" },
+  card:  { border: "1px solid #eee", borderRadius: 12, padding: 16, background: "#fff", marginBottom: 12 },
 };
+
+// helper แปลงไฟล์ -> base64
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
