@@ -1,7 +1,7 @@
 // api/seed.js  (โปรเจกต์ loh2-site) — เวอร์ชันจบในไฟล์เดียว
 
 import { kvSet } from './_utils/kv.js';
-export const config = { runtime: 'nodejs18.x' };
+export const runtime = 'nodejs';
 
 export default async function handler(req, res) {
   try {
