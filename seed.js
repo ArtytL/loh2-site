@@ -2,7 +2,7 @@
 import { kvSet } from './_utils/kv.js';
 
 // ใช้ Node runtime ให้รองรับ ESM/Fetch/ENV ชัวร์
-export const config = { runtime: 'nodejs18.x' };
+export const runtime = 'nodejs';
 
 export default async function handler(req, res) {
   try {
