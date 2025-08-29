@@ -10,7 +10,6 @@
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
   },
-  {
   "dependencies": {
     "jsonwebtoken": "^9.0.2",
     "@upstash/redis": "^1.35.3",
