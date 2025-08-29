@@ -1,25 +1,25 @@
-// /api/admin-login.js
-import jwt from "jsonwebtoken";
+// api/admin-login.js
+import jwt from 'jsonwebtoken';
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs' }; // ← ต้องเป็น 'nodejs' เท่านั้น
 
 export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    const { email, password } = JSON.parse(req.body || '{}');
+
+    if (email !== process.env.ADMIN_EMAIL || password !== process.env.ADMIN_PASSWORD) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
-    const { email, password } = JSON.parse(req.body || "{}");
-    if (
-      email !== process.env.ADMIN_EMAIL ||
-      password !== process.env.ADMIN_PASSWORD
-    ) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
-    }
+
     const token = jwt.sign(
-      { role: "admin", email },
+      { role: 'admin', email },
       process.env.ADMIN_JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: '7d' }
     );
+
     return res.json({ ok: true, token });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e) });
