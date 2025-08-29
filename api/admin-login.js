@@ -8,7 +8,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
   try {
-    const { email, password } = JSON.parse(req.body || '{}');
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+const { email, password } = body;
 
     if (email !== process.env.ADMIN_EMAIL || password !== process.env.ADMIN_PASSWORD) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
