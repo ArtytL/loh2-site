@@ -2,7 +2,7 @@
 import jwt from "jsonwebtoken";
 import { kvGet, kvSet } from "./_utils/kv.js";
 
-export const config = { runtime: "nodejs20.x" };
+export const config = { runtime: 'nodejs' };
 
 function verify(req) {
   const h = req.headers.authorization || "";
