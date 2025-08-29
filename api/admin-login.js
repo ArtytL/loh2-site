@@ -1,9 +1,9 @@
-// api/admin-login.js
+// /api/admin-login.js
 import jwt from "jsonwebtoken";
 
-- export const config = { runtime: 'nodejs20.x' };
-+ export const config = { runtime: 'nodejs' };
+export const config = { runtime: "nodejs" };
 
+export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ ok: false, error: "Method Not Allowed" });
