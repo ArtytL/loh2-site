@@ -1,6 +1,6 @@
 // api/products.js
 import jwt from "jsonwebtoken";
-import { kvGet, kvSet } from "./_utils/kv.js";
+import { kvGet, kvSet } from './_utils/kv.js';
 
 export const config = { runtime: 'nodejs' };
 
