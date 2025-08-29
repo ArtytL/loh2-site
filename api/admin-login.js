@@ -1,7 +1,7 @@
 // api/admin-login.js
 import jwt from 'jsonwebtoken';
 
-export const config = { runtime: 'nodejs' }; // ← ต้องเป็น 'nodejs' เท่านั้น
+export const config = { runtime: 'nodejs' };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
