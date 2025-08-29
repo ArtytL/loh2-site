@@ -1,5 +1,4 @@
 // api/orders.js
-// api/orders.js
 import jwt from "jsonwebtoken";
 import { kvGet, kvSet } from "./_utils/kv.js";
 
@@ -60,4 +59,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 }
-
