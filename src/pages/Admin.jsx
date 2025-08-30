@@ -1,521 +1,407 @@
-import { useEffect, useMemo, useState } from "react";
+// src/pages/Admin.jsx
+import React, { useEffect, useMemo, useState } from "react";
 
-const BASE = import.meta.env.VITE_API_URL || "";
+/** เปลี่ยน BASE ได้ถ้าคุณมี API แยกโดเมน; ถ้าใช้ API บนโดเมนเดียวกัน ปล่อย "" ได้เลย */
+const BASE = import.meta.env.VITE_API_URL || ""; // e.g. "" หรือ "https://loh2-site.vercel.app"
 
-function getToken() {
-  return localStorage.getItem("adminToken") || "";
-}
-function setToken(t) {
-  localStorage.setItem("adminToken", t);
-}
-function clearToken() {
-  localStorage.removeItem("adminToken");
+function useToken() {
+  const [token, setToken] = useState(() => localStorage.getItem("adminToken") || "");
+  const save = (t) => {
+    setToken(t);
+    if (t) localStorage.setItem("adminToken", t);
+    else localStorage.removeItem("adminToken");
+  };
+  return [token, save];
 }
 
-async function api(path, { method = "GET", json, auth = false } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  if (auth) headers["Authorization"] = `Bearer ${getToken()}`;
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: json ? JSON.stringify(json) : undefined,
-  });
+async function api(path, { token, ...opts } = {}) {
+  const url = `${BASE}${path}`;
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
-    const e = data?.error || res.statusText;
-    throw new Error(e || "Request failed");
+    throw new Error(data.error || `HTTP ${res.status}`);
   }
   return data;
 }
 
+const s = {
+  wrap: { maxWidth: 980, margin: "24px auto", padding: 16 },
+  row: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
+  input: { width: "100%", padding: "10px 12px", border: "1px solid #ddd", borderRadius: 8 },
+  btn: { padding: "10px 14px", borderRadius: 8, background: "#111", color: "#fff", cursor: "pointer", border: 0 },
+  chip: (on) => ({ padding: "8px 12px", borderRadius: 20, border: "1px solid #ddd", background: on ? "#111" : "#fff", color: on ? "#fff" : "#111", cursor: "pointer" }),
+  card: { border: "1px solid #eee", borderRadius: 12, padding: 16, background: "#fff" },
+  table: { width: "100%", borderCollapse: "collapse" },
+  thtd: { borderBottom: "1px solid #eee", padding: "8px 6px", textAlign: "left" },
+  danger: { background: "#c62828" },
+  ok: { background: "#1b5e20" },
+};
+
 export default function Admin() {
-  const [tab, setTab] = useState("products");
-  const [busy, setBusy] = useState(false);
+  const [token, setToken] = useToken();
+  const [tab, setTab] = useState("products"); // "products" | "orders" | "login"
   const [msg, setMsg] = useState("");
 
-  const hasToken = useMemo(() => !!getToken(), []);
-  useEffect(() => {
-    if (!getToken()) setTab("login");
-  }, []);
-
-  async function login(e) {
+  // ----- LOGIN -----
+  const [loginForm, setLoginForm] = useState({ email: "artyt.sun@gmail.com", password: "" });
+  const onLoginChange = (e) => setLoginForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+  const doLogin = async (e) => {
     e.preventDefault();
-    setBusy(true);
     setMsg("");
     try {
-      const form = new FormData(e.currentTarget);
-      const email = form.get("email");
-      const password = form.get("password");
-      const r = await api("/api/admin-login", {
+      const res = await api("/api/admin-login", {
         method: "POST",
-        json: { email, password },
+        body: JSON.stringify(loginForm),
       });
-      setToken(r.token);
-      setMsg("ล็อกอินสำเร็จ ✅");
-      setTab("products");
+      if (res.token) {
+        setToken(res.token);
+        setTab("products");
+      } else {
+        setMsg("เข้าสู่ระบบไม่สำเร็จ");
+      }
     } catch (err) {
-      setMsg("ล็อกอินไม่สำเร็จ: " + err.message);
-    } finally {
-      setBusy(false);
+      setMsg(err.message);
     }
-  }
+  };
 
-  const [items, setItems] = useState([]);
+  const logout = () => {
+    setToken("");
+    setTab("login");
+  };
+
+  // ----- PRODUCTS -----
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [products, setProducts] = useState([]);
   const [pForm, setPForm] = useState({
     name: "",
-    type: "DVD",
     price: "",
     qty: "",
-    images: "",
+    type: "DVD", // DVD | BLU-RAY
+    images: "", // กรอกเป็น URL คั่นด้วยบรรทัดใหม่
     youtube: "",
     detail: "",
   });
 
-  async function loadProducts() {
+  const fetchProducts = async () => {
     setLoadingProducts(true);
+    setMsg("");
     try {
-      const r = await api("/api/products");
-      setItems(r.items || []);
-    } catch (e) {
-      setMsg("โหลดสินค้าไม่สำเร็จ: " + e.message);
+      const res = await api("/api/products", { token });
+      setProducts(res.items || []);
+    } catch (err) {
+      setMsg(err.message);
     } finally {
       setLoadingProducts(false);
     }
-  }
-  useEffect(() => {
-    if (getToken()) loadProducts();
-  }, [tab]);
+  };
 
-  async function addProduct(e) {
+  const addProduct = async (e) => {
     e.preventDefault();
-    setBusy(true);
     setMsg("");
     try {
-      const imgs = (pForm.images || "")
+      const images = pForm.images
         .split("\n")
         .map((s) => s.trim())
-        .filter(Boolean);
-      const payload = {
+        .filter(Boolean)
+        .slice(0, 5);
+      const body = {
         name: pForm.name.trim(),
+        price: Number(pForm.price) || 0,
+        qty: Number(pForm.qty) || 0,
         type: pForm.type,
-        price: Number(pForm.price || 0),
-        qty: Number(pForm.qty || 0),
-        images: imgs.slice(0, 5),
-        youtube: pForm.youtube?.trim(),
-        detail: pForm.detail?.trim(),
+        images,
+        youtube: (pForm.youtube || "").trim(),
+        detail: (pForm.detail || "").trim(),
       };
-      await api("/api/products", { method: "POST", json: payload, auth: true });
-      setMsg("เพิ่มสินค้าเรียบร้อย ✅");
-      setPForm({
-        name: "",
-        type: "DVD",
-        price: "",
-        qty: "",
-        images: "",
-        youtube: "",
-        detail: "",
-      });
-      await loadProducts();
-    } catch (e) {
-      if (String(e).includes("Unauthorized")) setTab("login");
-      setMsg("เพิ่มสินค้าไม่สำเร็จ: " + e.message);
-    } finally {
-      setBusy(false);
+      const res = await api("/api/products", { method: "POST", token, body: JSON.stringify(body) });
+      setMsg("เพิ่มสินค้าเรียบร้อย");
+      setPForm({ name: "", price: "", qty: "", type: "DVD", images: "", youtube: "", detail: "" });
+      await fetchProducts();
+    } catch (err) {
+      setMsg(err.message);
     }
-  }
+  };
 
-  async function updateQty(id, delta) {
-    setBusy(true);
+  const delProduct = async (id) => {
+    if (!confirm("ลบสินค้าชิ้นนี้?")) return;
     setMsg("");
     try {
-      const item = items.find((x) => x.id === id);
-      if (!item) throw new Error("ไม่พบสินค้า");
-      const qty = Math.max(0, Number(item.qty || 0) + delta);
-      await api(`/api/products?id=${encodeURIComponent(id)}`, {
-        method: "PUT",
-        auth: true,
-        json: { qty },
-      });
-      await loadProducts();
-    } catch (e) {
-      if (String(e).includes("Unauthorized")) setTab("login");
-      setMsg("แก้จำนวนไม่สำเร็จ: " + e.message);
-    } finally {
-      setBusy(false);
+      await api("/api/products", { method: "DELETE", token, body: JSON.stringify({ id }) });
+      setMsg("ลบสินค้าแล้ว");
+      await fetchProducts();
+    } catch (err) {
+      setMsg(err.message);
     }
-  }
+  };
 
-  async function removeProduct(id) {
-    if (!confirm(`ลบสินค้า ${id}?`)) return;
-    setBusy(true);
+  const updateQty = async (id, qty) => {
     setMsg("");
     try {
-      await api(`/api/products?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        auth: true,
-      });
-      await loadProducts();
-      setMsg("ลบสินค้าแล้ว ✅");
-    } catch (e) {
-      if (String(e).includes("Unauthorized")) setTab("login");
-      setMsg("ลบสินค้าไม่สำเร็จ: " + e.message);
-    } finally {
-      setBusy(false);
+      await api("/api/products", { method: "PUT", token, body: JSON.stringify({ id, qty: Number(qty) || 0 }) });
+      await fetchProducts();
+    } catch (err) {
+      setMsg(err.message);
     }
-  }
+  };
 
-  const [orders, setOrders] = useState([]);
+  // ----- ORDERS -----
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [orders, setOrders] = useState([]);
 
-  async function loadOrders() {
+  const fetchOrders = async () => {
     setLoadingOrders(true);
+    setMsg("");
     try {
-      const r = await api("/api/orders");
-      setOrders(r.items || []);
-    } catch (e) {
-      setMsg("โหลดออเดอร์ไม่สำเร็จ: " + e.message);
+      const res = await api("/api/orders", { token });
+      setOrders(res.items || []);
+    } catch (err) {
+      setMsg(err.message);
     } finally {
       setLoadingOrders(false);
     }
-  }
-  useEffect(() => {
-    if (tab === "orders" && getToken()) loadOrders();
-  }, [tab]);
-
-  async function setOrderFlag(id, patch) {
-    setBusy(true);
-    setMsg("");
-    try {
-      await api(`/api/orders?id=${encodeURIComponent(id)}`, {
-        method: "PUT",
-        auth: true,
-        json: patch,
-      });
-      await loadOrders();
-    } catch (e) {
-      if (String(e).includes("Unauthorized")) setTab("login");
-      setMsg("อัปเดตออเดอร์ไม่สำเร็จ: " + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeOrder(id) {
-    if (!confirm(`ลบออเดอร์ ${id}?`)) return;
-    setBusy(true);
-    setMsg("");
-    try {
-      await api(`/api/orders?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        auth: true,
-      });
-      await loadOrders();
-    } catch (e) {
-      if (String(e).includes("Unauthorized")) setTab("login");
-      setMsg("ลบออเดอร์ไม่สำเร็จ: " + e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const s = {
-    wrap: { maxWidth: 980, margin: "24px auto", padding: 16 },
-    tabs: { display: "flex", gap: 8, marginBottom: 16 },
-    tab:
-      (t) =>
-      ({
-        padding: "8px 12px",
-        borderRadius: 8,
-        border: "1px solid #ddd",
-        background: tab === t ? "#111" : "#fff",
-        color: tab === t ? "#fff" : "#111",
-        cursor: "pointer",
-      }),
-    row: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
-    input: {
-      width: "100%",
-      padding: "10px 12px",
-      border: "1px solid #ddd",
-      borderRadius: 8,
-    },
-    btn: {
-      padding: "10px 14px",
-      borderRadius: 8,
-      background: "#111",
-      color: "#fff",
-      border: 0,
-      cursor: "pointer",
-    },
-    danger: {
-      padding: "8px 10px",
-      borderRadius: 8,
-      background: "#c00",
-      color: "#fff",
-      border: 0,
-      cursor: "pointer",
-    },
-    table: {
-      width: "100%",
-      borderCollapse: "collapse",
-      marginTop: 12,
-    },
-    thtd: { borderBottom: "1px solid #eee", padding: "8px 6px", textAlign: "left" },
-    badge: (ok) => ({
-      display: "inline-block",
-      padding: "2px 8px",
-      borderRadius: 999,
-      background: ok ? "#16a34a" : "#e5e7eb",
-      color: ok ? "#fff" : "#111",
-      marginLeft: 6,
-      fontSize: 12,
-    }),
-    notice: { marginTop: 10, color: "#d00" },
-    topbar: { display: "flex", justifyContent: "space-between", marginBottom: 12 },
   };
+
+  const toggleOrder = async (id, field, on) => {
+    setMsg("");
+    try {
+      await api("/api/orders", { method: "PUT", token, body: JSON.stringify({ id, [field]: !!on }) });
+      await fetchOrders();
+    } catch (err) {
+      setMsg(err.message);
+    }
+  };
+
+  const delOrder = async (id) => {
+    if (!confirm("ลบออเดอร์นี้?")) return;
+    setMsg("");
+    try {
+      await api("/api/orders", { method: "DELETE", token, body: JSON.stringify({ id }) });
+      await fetchOrders();
+    } catch (err) {
+      setMsg(err.message);
+    }
+  };
+
+  // first mount: ถ้ายังไม่มี token ให้ไปแท็บ login
+  useEffect(() => {
+    if (!token) setTab("login");
+  }, [token]);
+
+  // auto reload list เมื่อเปลี่ยนแท็บ
+  useEffect(() => {
+    if (!token) return;
+    if (tab === "products") fetchProducts();
+    if (tab === "orders") fetchOrders();
+  }, [tab, token]);
 
   return (
     <div style={s.wrap}>
-      <div style={s.topbar}>
-        <div>
-          <strong>Admin</strong>{" "}
-          {hasToken || getToken() ? (
-            <span style={s.badge(true)}>online</span>
+      <header style={{ ...s.row, justifyContent: "space-between" }}>
+        <h1 style={{ margin: 0 }}>Admin Panel</h1>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={s.chip(tab === "products")} onClick={() => setTab("products")} disabled={!token}>
+            จัดการสินค้า
+          </button>
+          <button style={s.chip(tab === "orders")} onClick={() => setTab("orders")} disabled={!token}>
+            ออเดอร์
+          </button>
+          {!token ? (
+            <button style={s.chip(tab === "login")} onClick={() => setTab("login")}>
+              เข้าสู่ระบบ
+            </button>
           ) : (
-            <span style={s.badge(false)}>offline</span>
+            <button style={s.chip(false)} onClick={logout}>
+              ออกจากระบบ
+            </button>
           )}
         </div>
-        {(hasToken || getToken()) && (
-          <button
-            style={s.btn}
-            onClick={() => {
-              clearToken();
-              setTab("login");
-            }}
-          >
-            ออกจากระบบ
-          </button>
-        )}
-      </div>
+      </header>
 
-      <div style={s.tabs}>
-        <button style={s.tab("products")} onClick={() => setTab("products")}>
-          จัดการสินค้า
-        </button>
-        <button style={s.tab("orders")} onClick={() => setTab("orders")}>
-          ออเดอร์
-        </button>
-        <button style={s.tab("login")} onClick={() => setTab("login")}>
-          ล็อกอิน
-        </button>
-      </div>
+      {msg && <p style={{ color: "#c00", marginTop: 12 }}>{msg}</p>}
 
-      {msg && <div style={s.notice}>{msg}</div>}
-      {busy && <p>กำลังทำงาน...</p>}
-
+      {/* LOGIN */}
       {tab === "login" && (
-        <form onSubmit={login} style={{ maxWidth: 420 }}>
-          <div style={{ marginBottom: 8 }}>
-            <label>อีเมล</label>
-            <input name="email" required placeholder="admin email" style={s.input} type="email" />
+        <section style={{ marginTop: 16 }}>
+          <div style={s.card}>
+            <h3 style={{ marginTop: 0 }}>เข้าสู่ระบบผู้ดูแล</h3>
+            <form onSubmit={doLogin} style={{ display: "grid", gap: 10 }}>
+              <input name="email" placeholder="อีเมล" value={loginForm.email} onChange={onLoginChange} style={s.input} />
+              <input
+                name="password"
+                placeholder="รหัสผ่าน"
+                type="password"
+                value={loginForm.password}
+                onChange={onLoginChange}
+                style={s.input}
+              />
+              <button style={s.btn}>เข้าสู่ระบบ</button>
+            </form>
+            <p style={{ color: "#666", marginTop: 12 }}>
+              * ใช้ค่าใน Vercel Env: <code>ADMIN_EMAIL</code> และ <code>ADMIN_PASSWORD</code>
+            </p>
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <label>รหัสผ่าน</label>
-            <input
-              name="password"
-              required
-              placeholder="password"
-              style={s.input}
-              type="password"
-              autoComplete="current-password"
-            />
-          </div>
-          <button style={s.btn} disabled={busy}>
-            {busy ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
-          </button>
-        </form>
+        </section>
       )}
 
-      {tab === "products" && (
-        <>
-          <h3>เพิ่มสินค้าใหม่</h3>
-          <form onSubmit={addProduct} style={{ marginBottom: 20 }}>
-            <div style={s.row}>
+      {/* PRODUCTS */}
+      {tab === "products" && token && (
+        <section style={{ marginTop: 16 }}>
+          <div style={s.card}>
+            <h3 style={{ marginTop: 0 }}>เพิ่มสินค้า</h3>
+            <form onSubmit={addProduct} style={{ display: "grid", gap: 10 }}>
               <input
-                style={s.input}
                 placeholder="ชื่อสินค้า"
                 value={pForm.name}
-                onChange={(e) => setPForm({ ...pForm, name: e.target.value })}
-                required
-              />
-              <select
+                onChange={(e) => setPForm((v) => ({ ...v, name: e.target.value }))}
                 style={s.input}
-                value={pForm.type}
-                onChange={(e) => setPForm({ ...pForm, type: e.target.value })}
-              >
-                <option>DVD</option>
-                <option>BLURAY</option>
-              </select>
-            </div>
-            <div style={s.row}>
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <input
+                  placeholder="ราคา"
+                  value={pForm.price}
+                  onChange={(e) => setPForm((v) => ({ ...v, price: e.target.value }))}
+                  style={s.input}
+                />
+                <input
+                  placeholder="จำนวน (สต็อก)"
+                  value={pForm.qty}
+                  onChange={(e) => setPForm((v) => ({ ...v, qty: e.target.value }))}
+                  style={s.input}
+                />
+                <select
+                  value={pForm.type}
+                  onChange={(e) => setPForm((v) => ({ ...v, type: e.target.value }))}
+                  style={s.input}
+                >
+                  <option>DVD</option>
+                  <option>BLU-RAY</option>
+                </select>
+              </div>
+              <textarea
+                placeholder={"วางรูปภาพสินค้าเป็น URL (สูงสุด 5 รูป)\nคั่นด้วยบรรทัดใหม่"}
+                rows={4}
+                value={pForm.images}
+                onChange={(e) => setPForm((v) => ({ ...v, images: e.target.value }))}
+                style={{ ...s.input, minHeight: 96 }}
+              />
               <input
+                placeholder="YouTube URL (ถ้ามี)"
+                value={pForm.youtube}
+                onChange={(e) => setPForm((v) => ({ ...v, youtube: e.target.value }))}
                 style={s.input}
-                type="number"
-                placeholder="ราคา"
-                value={pForm.price}
-                onChange={(e) => setPForm({ ...pForm, price: e.target.value })}
-                required
               />
-              <input
-                style={s.input}
-                type="number"
-                placeholder="จำนวน (qty)"
-                value={pForm.qty}
-                onChange={(e) => setPForm({ ...pForm, qty: e.target.value })}
-                required
+              <textarea
+                placeholder="รายละเอียดสินค้า"
+                rows={3}
+                value={pForm.detail}
+                onChange={(e) => setPForm((v) => ({ ...v, detail: e.target.value }))}
+                style={{ ...s.input, minHeight: 80 }}
               />
-            </div>
-            <textarea
-              style={{ ...s.input, minHeight: 90, marginTop: 8 }}
-              placeholder={"ใส่ลิงก์รูปภาพ 4–5 รูป (1 บรรทัด/รูป)\nhttps://...\nhttps://...\n..."}
-              value={pForm.images}
-              onChange={(e) => setPForm({ ...pForm, images: e.target.value })}
-            />
-            <input
-              style={{ ...s.input, marginTop: 8 }}
-              placeholder="YouTube URL"
-              value={pForm.youtube}
-              onChange={(e) => setPForm({ ...pForm, youtube: e.target.value })}
-            />
-            <textarea
-              style={{ ...s.input, minHeight: 80, marginTop: 8 }}
-              placeholder="รายละเอียดสินค้า"
-              value={pForm.detail}
-              onChange={(e) => setPForm({ ...pForm, detail: e.target.value })}
-            />
-            <div style={{ marginTop: 8 }}>
-              <button style={s.btn} disabled={busy}>
-                {busy ? "กำลังบันทึก..." : "เพิ่มสินค้า"}
-              </button>
-            </div>
-          </form>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h3 style={{ margin: 0 }}>รายการสินค้า</h3>
-            <button style={s.btn} onClick={loadProducts} disabled={loadingProducts}>
-              รีเฟรช
-            </button>
+              <button style={s.btn}>บันทึกสินค้า</button>
+            </form>
           </div>
-          <table style={s.table}>
-            <thead>
-              <tr>
-                <th style={s.thtd}>ID</th>
-                <th style={s.thtd}>ชื่อ</th>
-                <th style={s.thtd}>ชนิด</th>
-                <th style={s.thtd}>ราคา</th>
-                <th style={s.thtd}>จำนวน</th>
-                <th style={s.thtd}>สถานะ</th>
-                <th style={s.thtd}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(items || []).map((p) => (
-                <tr key={p.id}>
-                  <td style={s.thtd}>{p.id}</td>
-                  <td style={s.thtd}>{p.name}</td>
-                  <td style={s.thtd}>{p.type || "-"}</td>
-                  <td style={s.thtd}>{Number(p.price || 0).toLocaleString()}</td>
-                  <td style={s.thtd}>
-                    {p.qty}
-                    &nbsp;
-                    <button onClick={() => updateQty(p.id, +1)} style={s.btn}>
-                      +1
-                    </button>{" "}
-                    <button onClick={() => updateQty(p.id, -1)} style={s.btn}>
-                      -1
-                    </button>
-                  </td>
-                  <td style={s.thtd}>
-                    {Number(p.qty) > 0 ? (
-                      <span style={s.badge(true)}>ขายได้</span>
-                    ) : (
-                      <span style={s.badge(false)}>Sold out</span>
-                    )}
-                  </td>
-                  <td style={s.thtd}>
-                    <button style={s.danger} onClick={() => removeProduct(p.id)}>
-                      ลบ
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+
+          <div style={{ ...s.card, marginTop: 16 }}>
+            <h3 style={{ marginTop: 0 }}>รายการสินค้า</h3>
+            {loadingProducts ? (
+              <p>กำลังโหลด…</p>
+            ) : products.length === 0 ? (
+              <p>ยังไม่มีสินค้า</p>
+            ) : (
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    <th style={s.thtd}>ID</th>
+                    <th style={s.thtd}>ชื่อ</th>
+                    <th style={s.thtd}>ประเภท</th>
+                    <th style={s.thtd}>ราคา</th>
+                    <th style={s.thtd}>คงเหลือ</th>
+                    <th style={s.thtd}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((p) => (
+                    <tr key={p.id}>
+                      <td style={s.thtd}>{p.id || "-"}</td>
+                      <td style={s.thtd}>{p.name}</td>
+                      <td style={s.thtd}>{p.type}</td>
+                      <td style={s.thtd}>{p.price}</td>
+                      <td style={s.thtd}>
+                        <input
+                          defaultValue={p.qty ?? 0}
+                          onBlur={(e) => updateQty(p.id, e.target.value)}
+                          style={{ ...s.input, width: 90, padding: "6px 8px" }}
+                        />
+                      </td>
+                      <td style={s.thtd}>
+                        <button style={{ ...s.btn, ...s.danger }} onClick={() => delProduct(p.id)}>
+                          ลบ
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
       )}
 
-      {tab === "orders" && (
-        <>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <h3 style={{ margin: 0 }}>ออเดอร์</h3>
-            <button style={s.btn} onClick={loadOrders} disabled={loadingOrders}>
-              รีเฟรช
-            </button>
+      {/* ORDERS */}
+      {tab === "orders" && token && (
+        <section style={{ marginTop: 16 }}>
+          <div style={s.card}>
+            <h3 style={{ marginTop: 0 }}>ออเดอร์</h3>
+            {loadingOrders ? (
+              <p>กำลังโหลด…</p>
+            ) : orders.length === 0 ? (
+              <p>ยังไม่มีออเดอร์</p>
+            ) : (
+              <table style={s.table}>
+                <thead>
+                  <tr>
+                    <th style={s.thtd}>เลขที่</th>
+                    <th style={s.thtd}>ลูกค้า</th>
+                    <th style={s.thtd}>ยอดรวม</th>
+                    <th style={s.thtd}>ชำระแล้ว</th>
+                    <th style={s.thtd}>จัดส่งแล้ว</th>
+                    <th style={s.thtd}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((o) => (
+                    <tr key={o.id}>
+                      <td style={s.thtd}>{o.id}</td>
+                      <td style={s.thtd}>{o.name || o.customer || "-"}</td>
+                      <td style={s.thtd}>{o.total ?? 0}</td>
+                      <td style={s.thtd}>
+                        <input
+                          type="checkbox"
+                          defaultChecked={!!o.paid}
+                          onChange={(e) => toggleOrder(o.id, "paid", e.target.checked)}
+                        />
+                      </td>
+                      <td style={s.thtd}>
+                        <input
+                          type="checkbox"
+                          defaultChecked={!!o.shipped}
+                          onChange={(e) => toggleOrder(o.id, "shipped", e.target.checked)}
+                        />
+                      </td>
+                      <td style={s.thtd}>
+                        <button style={{ ...s.btn, ...s.danger }} onClick={() => delOrder(o.id)}>
+                          ลบ
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-          <table style={s.table}>
-            <thead>
-              <tr>
-                <th style={s.thtd}>เลขที่</th>
-                <th style={s.thtd}>ลูกค้า</th>
-                <th style={s.thtd}>รวม</th>
-                <th style={s.thtd}>ชำระ</th>
-                <th style={s.thtd}>จัดส่ง</th>
-                <th style={s.thtd}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(orders || []).map((o) => (
-                <tr key={o.id}>
-                  <td style={s.thtd}>{o.id}</td>
-                  <td style={s.thtd}>
-                    {o.name}
-                    <div style={{ color: "#666", fontSize: 12 }}>
-                      {o.email} · {o.phone}
-                    </div>
-                  </td>
-                  <td style={s.thtd}>
-                    {Number(o.total || 0).toLocaleString()} บาท
-                  </td>
-                  <td style={s.thtd}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={!!o.paid}
-                        onChange={(e) => setOrderFlag(o.id, { paid: e.target.checked })}
-                      />{" "}
-                      {o.paid ? "ชำระแล้ว" : "ยัง"}
-                    </label>
-                  </td>
-                  <td style={s.thtd}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={!!o.shipped}
-                        onChange={(e) => setOrderFlag(o.id, { shipped: e.target.checked })}
-                      />{" "}
-                      {o.shipped ? "จัดส่งแล้ว" : "ยัง"}
-                    </label>
-                  </td>
-                  <td style={s.thtd}>
-                    <button style={s.danger} onClick={() => removeOrder(o.id)}>
-                      ลบ
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+        </section>
       )}
     </div>
   );
