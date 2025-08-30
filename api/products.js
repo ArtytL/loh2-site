@@ -1,88 +1,49 @@
-// api/products.js
-import jwt from "jsonwebtoken";
-import { kvGet, kvSet } from "./_utils/kv.js";
+// … ด้านบนเหมือนเดิม (verify, loadItems, saveItems) …
 
-export const config = { runtime: "nodejs" };
+// ===== เพิ่ม/แก้ไข payload normalizer =====
+function normalizeIncoming(body = {}) {
+  // รองรับทั้ง title หรือ name
+  const title = (body.title ?? body.name ?? "").toString().trim();
 
-// ตรวจ token จาก Authorization: Bearer <token>
-function verify(req) {
-  const h = req.headers.authorization || "";
-  const m = h.match(/^Bearer (.+)$/i);
-  if (!m) return null;
-  try {
-    return jwt.verify(m[1], process.env.ADMIN_JWT_SECRET);
-  } catch {
-    return null;
+  // รวมรูปจาก images[] หรือ image1..image5
+  let images = [];
+  if (Array.isArray(body.images)) {
+    images = body.images.filter(Boolean);
+  } else {
+    images = [
+      body.image1, body.image2, body.image3, body.image4, body.image5
+    ].filter(Boolean);
   }
-}
 
-// อ่านสินค้าแบบทนทานต่อหลายรูปแบบข้อมูล
-async function loadItems() {
-  const raw = await kvGet("products");
-  let items = [];
+  const type   = (body.type ?? body.category ?? "DVD").toString().trim();
+  const price  = Number(body.price ?? 0) || 0;
+  const qty    = Number(body.qty   ?? 0) || 0;
+  const detail = (body.detail ?? body.description ?? "").toString();
+  const youtube = (body.youtube ?? body.youtubeUrl ?? "").toString();
 
-  if (!raw) return items;
-
-  if (typeof raw === "string") {
-    try {
-      items = JSON.parse(raw || "[]");
-    } catch {
-      items = [];
-    }
-  } else if (Array.isArray(raw)) {
-    items = raw;
-  } else if (typeof raw === "object" && raw) {
-    // เผื่อกรณี { value: '...'}
-    const v = raw.value;
-    if (typeof v === "string") {
-      try {
-        items = JSON.parse(v || "[]");
-      } catch {
-        items = [];
-      }
-    } else if (Array.isArray(v)) {
-      items = v;
-    }
-  }
-  return Array.isArray(items) ? items : [];
-}
-
-async function saveItems(items) {
-  await kvSet("products", JSON.stringify(items || []));
+  return { title, type, price, qty, detail, youtube, images };
 }
 
 export default async function handler(req, res) {
   try {
-    // GET: ดึงรายการ
     if (req.method === "GET") {
       const items = await loadItems();
       return res.json({ ok: true, items });
     }
 
-    // ต้องเป็น admin
     const admin = verify(req);
     if (!admin) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
-    const body =
-      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const rawBody = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     let items = await loadItems();
 
-    // POST: เพิ่มสินค้า
     if (req.method === "POST") {
       let seq = Number((await kvGet("product:seq")) || 0) + 1;
       await kvSet("product:seq", String(seq));
 
-      const now = new Date().toISOString();
-      const {
-        title = "",
-        type = "DVD",
-        price = 0,
-        qty = 0,
-        detail = "",
-        youtube = "",
-        images = [],
-      } = body;
+      const { title, type, price, qty, detail, youtube, images } = normalizeIncoming(rawBody);
 
+      const now = new Date().toISOString();
       const idPrefix = type === "Blu-ray" ? "BR" : "DVD";
       const id = `${idPrefix}-${String(seq).padStart(3, "0")}`;
 
@@ -90,10 +51,10 @@ export default async function handler(req, res) {
         id,
         title,
         type,
-        price: Number(price) || 0,
-        qty: Number(qty) || 0,
-        cover: Array.isArray(images) && images[0] ? images[0] : "",
-        images: Array.isArray(images) ? images : [],
+        price,
+        qty,
+        cover: images[0] ?? "",
+        images,
         youtube,
         detail,
         createdAt: now,
@@ -105,32 +66,31 @@ export default async function handler(req, res) {
       return res.json({ ok: true, item: product, items });
     }
 
-    // PUT: แก้ไข
     if (req.method === "PUT") {
-      const { id, ...changes } = body || {};
+      const { id, ...changesRaw } = rawBody || {};
       const idx = items.findIndex((x) => x.id === id);
       if (idx === -1) return res.status(404).json({ ok: false, error: "Not found" });
 
-      const updated = {
+      const normalized = normalizeIncoming(changesRaw);
+      const merged = {
         ...items[idx],
-        ...changes,
-        price: Number(changes.price ?? items[idx].price) || 0,
-        qty: Number(changes.qty ?? items[idx].qty) || 0,
-        images: Array.isArray(changes.images) ? changes.images : items[idx].images,
+        ...normalized,
+        price: normalized.price,
+        qty: normalized.qty,
+        cover: (normalized.images?.[0] ?? items[idx].cover ?? ""),
         updatedAt: new Date().toISOString(),
       };
 
-      items[idx] = updated;
+      items[idx] = merged;
       await saveItems(items);
-      return res.json({ ok: true, item: updated, items });
+      return res.json({ ok: true, item: merged, items });
     }
 
-    // DELETE: ลบ
     if (req.method === "DELETE") {
-      const { id } = body || {};
-      const next = items.filter((x) => x.id !== id);
-      await saveItems(next);
-      return res.json({ ok: true, items: next });
+      const { id } = rawBody || {};
+      items = items.filter((x) => x.id !== id);
+      await saveItems(items);
+      return res.json({ ok: true, items });
     }
 
     return res.status(405).json({ ok: false, error: "Method Not Allowed" });
