@@ -1,41 +1,60 @@
 // api/_utils/kv.js
-// ใช้ REST แบบง่ายของ Upstash: /get /set /del
+// ต้องมี ENV ใน Vercel: KV_REST_API_URL, KV_REST_API_TOKEN
 
-const API = process.env.KV_REST_API_URL;
+const URL_BASE = process.env.KV_REST_API_URL;
 const TOKEN = process.env.KV_REST_API_TOKEN;
 
-if (!API || !TOKEN) {
-  throw new Error("Missing KV_REST_API_URL or KV_REST_API_TOKEN");
+function must() {
+  if (!URL_BASE || !TOKEN) {
+    throw new Error("Missing KV_REST_API_URL / KV_REST_API_TOKEN");
+  }
 }
 
-const H = { Authorization: `Bearer ${TOKEN}` };
-
-// คืนค่าที่อ่านจาก KV (ปกติ Upstash จะตอบ {result:"..."} หรือ {value:"..."})
+/** อ่านค่า: คืนเป็น string/object หรือ null */
 export async function kvGet(key) {
-  const r = await fetch(`${API}/get/${encodeURIComponent(key)}`, {
-    headers: H,
+  must();
+  const res = await fetch(`${URL_BASE}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
     cache: "no-store",
   });
-  if (!r.ok) throw new Error(`KV GET failed: ${r.status}`);
-  const data = await r.json();
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  // Upstash อาจคืน {result} หรือ {value}
   return data.result ?? data.value ?? null;
 }
 
-// เขียนค่าใส่ KV (value ต้องเป็นสตริง)
+/** เขียนค่า: value รับได้ทั้ง string หรือ object (จะ JSON.stringify ให้) */
 export async function kvSet(key, value) {
-  const r = await fetch(
-    `${API}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`,
-    { method: "POST", headers: H }
+  must();
+  const v = typeof value === "string" ? value : JSON.stringify(value);
+  const res = await fetch(
+    `${URL_BASE}/set/${encodeURIComponent(key)}/${encodeURIComponent(v)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    }
   );
-  if (!r.ok) throw new Error(`KV SET failed: ${r.status}`);
-  return r.json();
+  if (!res.ok) throw new Error(await res.text());
+  return true;
 }
 
-export async function kvDel(key) {
-  const r = await fetch(`${API}/del/${encodeURIComponent(key)}`, {
+/** (ไม่บังคับใช้) เขียนหลายคีย์แบบ batch */
+export async function kvSetPairs(pairs = []) {
+  must();
+  // pairs: [[key, value], ...]
+  const commands = pairs.map(([k, v]) => [
+    "SET",
+    k,
+    typeof v === "string" ? v : JSON.stringify(v),
+  ]);
+  const res = await fetch(`${URL_BASE}/pipeline`, {
     method: "POST",
-    headers: H,
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(commands),
   });
-  if (!r.ok) throw new Error(`KV DEL failed: ${r.status}`);
-  return r.json();
+  if (!res.ok) throw new Error(await res.text());
+  return true;
 }
