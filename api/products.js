@@ -1,9 +1,10 @@
 // api/products.js
 import jwt from "jsonwebtoken";
-import { kvGet, kvSet } from './_utils/kv.js';
+import { kvGet, kvSet } from "./_utils/kv.js";
 
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: "nodejs" };
 
+// ตรวจสอบ token จากเฮดเดอร์ Authorization: Bearer <token>
 function verify(req) {
   const h = req.headers.authorization || "";
   const m = h.match(/^Bearer (.+)$/i);
@@ -15,78 +16,147 @@ function verify(req) {
   }
 }
 
+// helper: โหลดรายการสินค้าแบบทนทานต่อหลายรูปแบบข้อมูลใน KV
+async function loadItems() {
+  const raw = await kvGet("products");
+  let items = [];
+
+  if (!raw) return items;
+
+  // กรณี Upstash คืน { value: ... }
+  if (Object.prototype.hasOwnProperty.call(raw, "value")) {
+    const v = raw.value;
+    if (typeof v === "string") items = JSON.parse(v || "[]");
+    else if (Array.isArray(v)) items = v;
+    else if (typeof v === "object" && v) items = v.items || [];
+    return items;
+  }
+
+  // กรณีเป็นสตริง JSON ตรง ๆ
+  if (typeof raw === "string") return JSON.parse(raw || "[]");
+
+  // กรณีเป็นอาร์เรย์อยู่แล้ว
+  if (Array.isArray(raw)) return raw;
+
+  // กรณีเป็นอ็อบเจกต์อื่น ๆ
+  if (typeof raw === "object" && raw) return raw.items || [];
+
+  return items;
+}
+
+// helper: บันทึกรายการสินค้า (ต้อง stringify เสมอ)
+async function saveItems(items) {
+  await kvSet("products", JSON.stringify(items || []));
+}
+
 export default async function handler(req, res) {
   try {
-    // GET รายการสินค้า
+    // ------------------------
+    // GET : ดึงรายการสินค้า
+    // ------------------------
     if (req.method === "GET") {
-      const items = (await kvGet("products")) || [];
+      const items = await loadItems();
       return res.json({ ok: true, items });
     }
 
-    // ต้องเป็นแอดมินสำหรับ POST/PUT/DELETE
+    // ตั้งแต่ตรงนี้ไป ต้องเป็น admin เท่านั้น
     const admin = verify(req);
-    if (!admin) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!admin) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
-    const body = JSON.parse(req.body || "{}");
-    let items = (await kvGet("products")) || [];
+    // body อาจเป็นสตริงหรืออ็อบเจกต์ ขึ้นกับแพลตฟอร์ม
+    const body =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
 
+    let items = await loadItems();
+
+    // ------------------------
+    // POST : เพิ่มสินค้าใหม่
+    // ------------------------
     if (req.method === "POST") {
-      // เพิ่มสินค้าใหม่
+      // รันเลขลำดับ (ถ้ามี)
       let seq = (await kvGet("product:seq")) || 0;
       seq += 1;
-      const id = "P" + String(seq).padStart(4, "0");
-      const now = Date.now();
+      await kvSet("product:seq", seq);
+
+      const now = new Date().toISOString();
+      const {
+        title = "",
+        type = "DVD", // "DVD" | "Blu-ray"
+        price = 0,
+        qty = 0,
+        detail = "",
+        youtube = "",
+        images = [], // array รูปภาพ
+      } = body;
+
+      const idPrefix = type === "Blu-ray" ? "BR" : "DVD";
+      const id = `${idPrefix}-${String(seq).padStart(3, "0")}`;
+
       const product = {
         id,
-        title: body.title?.trim() || "",
-        type: body.type === "Blu-ray" ? "Blu-ray" : "DVD",
-        price: Number(body.price) || 0,
-        qty: Number(body.qty) || 0,
-        desc: body.desc || "",
-        youtube: body.youtube || "",
-        images: Array.isArray(body.images) ? body.images.slice(0, 5) : [],
+        title,
+        type,
+        price: Number(price) || 0,
+        qty: Number(qty) || 0,
+        cover: images?.[0] || "", // ปกใช้รูปแรก
+        images: Array.isArray(images) ? images : [],
+        youtube,
+        detail,
         createdAt: now,
         updatedAt: now,
       };
+
       items.push(product);
-      await kvSet("products", items);
-      await kvSet("product:seq", seq);
-      return res.json({ ok: true, item: product });
+      await saveItems(items);
+      return res.json({ ok: true, item: product, items });
     }
 
+    // ------------------------
+    // PUT : แก้ไขสินค้า
+    // ------------------------
     if (req.method === "PUT") {
-      // แก้ไขสินค้า
-      const idx = items.findIndex((x) => x.id === body.id);
-      if (idx < 0) return res.status(404).json({ ok: false, error: "Not found" });
-      const p = items[idx];
-      items[idx] = {
-        ...p,
-        title: body.title ?? p.title,
-        type: body.type ?? p.type,
-        price: body.price != null ? Number(body.price) : p.price,
-        qty: body.qty != null ? Number(body.qty) : p.qty,
-        desc: body.desc ?? p.desc,
-        youtube: body.youtube ?? p.youtube,
-        images: Array.isArray(body.images) ? body.images.slice(0, 5) : p.images,
-        updatedAt: Date.now(),
-      };
-      await kvSet("products", items);
-      return res.json({ ok: true, item: items[idx] });
-    }
-
-    if (req.method === "DELETE") {
-      // ลบสินค้า
-      const id = body.id;
-      const next = items.filter((x) => x.id !== id);
-      if (next.length === items.length) {
+      const { id, ...changes } = body || {};
+      const idx = items.findIndex((x) => x.id === id);
+      if (idx === -1)
         return res.status(404).json({ ok: false, error: "Not found" });
-      }
-      await kvSet("products", next);
-      return res.json({ ok: true });
+
+      const updated = {
+        ...items[idx],
+        ...changes,
+        updatedAt: new Date().toISOString(),
+      };
+      // ทำความสะอาดค่าที่ต้องเป็นตัวเลข/อาร์เรย์
+      if ("price" in updated) updated.price = Number(updated.price) || 0;
+      if ("qty" in updated) updated.qty = Number(updated.qty) || 0;
+      if ("images" in updated && !Array.isArray(updated.images))
+        updated.images = [];
+
+      items[idx] = updated;
+      await saveItems(items);
+      return res.json({ ok: true, item: updated, items });
     }
 
-    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    // ------------------------
+    // DELETE : ลบสินค้า
+    // ------------------------
+    if (req.method === "DELETE") {
+      const { id } = body || {};
+      const next = items.filter((x) => x.id !== id);
+      await saveItems(next);
+      return res.json({ ok: true, items: next });
+    }
+
+    // method ไม่รองรับ
+    return res
+      .status(405)
+      .json({ ok: false, error: "Method Not Allowed" });
+
   } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e) });
+    // กัน JSON parse พังหรือ error อื่นๆ
+    return res
+      .status(500)
+      .json({ ok: false, error: String(e && e.message ? e.message : e) });
   }
 }
