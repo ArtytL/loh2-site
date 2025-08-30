@@ -19,7 +19,6 @@ export async function kvGet(key) {
   });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
-  // Upstash อาจคืน {result} หรือ {value}
   return data.result ?? data.value ?? null;
 }
 
@@ -38,10 +37,9 @@ export async function kvSet(key, value) {
   return true;
 }
 
-/** (ไม่บังคับใช้) เขียนหลายคีย์แบบ batch */
+/** (ออปชัน) เขียนหลายคีย์แบบ batch */
 export async function kvSetPairs(pairs = []) {
   must();
-  // pairs: [[key, value], ...]
   const commands = pairs.map(([k, v]) => [
     "SET",
     k,
