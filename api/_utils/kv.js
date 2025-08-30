@@ -1,60 +1,41 @@
 // api/_utils/kv.js
+// ใช้ REST แบบง่ายของ Upstash: /get /set /del
 
-// อ่านค่า key เดียวจาก Upstash REST KV
-export async function kvGet(key) {
-  const { KV_REST_API_URL, KV_REST_API_TOKEN } = process.env;
-  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) {
-    throw new Error('Missing KV_REST_API_URL or KV_REST_API_TOKEN');
-  }
+const API = process.env.KV_REST_API_URL;
+const TOKEN = process.env.KV_REST_API_TOKEN;
 
-  const res = await fetch(
-    `${KV_REST_API_URL}/get/${encodeURIComponent(key)}`,
-    { headers: { Authorization: `Bearer ${KV_REST_API_TOKEN}` } }
-  );
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`KV GET ${key} failed: ${res.status} ${txt}`);
-  }
-
-  const data = await res.json().catch(() => ({}));
-  let v = data?.result ?? null;
-
-  // แปลง string ที่เป็น JSON ให้กลายเป็น object อัตโนมัติ
-  if (typeof v === 'string') {
-    try { v = JSON.parse(v); } catch {}
-  }
-  return v;
+if (!API || !TOKEN) {
+  throw new Error("Missing KV_REST_API_URL or KV_REST_API_TOKEN");
 }
 
-// เซ็ตค่าหลาย key แบบ pipeline [['key','value'], ...]
-export async function kvSet(pairs) {
-  const { KV_REST_API_URL, KV_REST_API_TOKEN } = process.env;
-  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) {
-    throw new Error('Missing KV_REST_API_URL or KV_REST_API_TOKEN');
-  }
+const H = { Authorization: `Bearer ${TOKEN}` };
 
-  // รองรับทั้งรูปแบบ ['k','v'] เดี่ยว และแบบหลายคู่
-  const list = Array.isArray(pairs?.[0]) ? pairs : [pairs];
-
-  const commands = list.map(([k, v]) => [
-    'SET',
-    String(k),
-    typeof v === 'string' ? v : JSON.stringify(v),
-  ]);
-
-  const res = await fetch(`${KV_REST_API_URL}/pipeline`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${KV_REST_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(commands),
+// คืนค่าที่อ่านจาก KV (ปกติ Upstash จะตอบ {result:"..."} หรือ {value:"..."})
+export async function kvGet(key) {
+  const r = await fetch(`${API}/get/${encodeURIComponent(key)}`, {
+    headers: H,
+    cache: "no-store",
   });
+  if (!r.ok) throw new Error(`KV GET failed: ${r.status}`);
+  const data = await r.json();
+  return data.result ?? data.value ?? null;
+}
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`KV SET failed: ${res.status} ${txt}`);
-  }
-  return true;
+// เขียนค่าใส่ KV (value ต้องเป็นสตริง)
+export async function kvSet(key, value) {
+  const r = await fetch(
+    `${API}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`,
+    { method: "POST", headers: H }
+  );
+  if (!r.ok) throw new Error(`KV SET failed: ${r.status}`);
+  return r.json();
+}
+
+export async function kvDel(key) {
+  const r = await fetch(`${API}/del/${encodeURIComponent(key)}`, {
+    method: "POST",
+    headers: H,
+  });
+  if (!r.ok) throw new Error(`KV DEL failed: ${r.status}`);
+  return r.json();
 }
