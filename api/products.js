@@ -1,121 +1,114 @@
 // api/products.js
 import jwt from "jsonwebtoken";
 import { kvGet, kvSet } from "./_utils/kv.js";
+
 export const config = { runtime: "nodejs" };
 
 // ---------- helpers ----------
 function verify(req) {
-  const m = (req.headers.authorization || "").match(/^Bearer (.+)$/i);
+  const h = req.headers.authorization || "";
+  const m = h.match(/^Bearer (.+)$/i);
   if (!m) return null;
-  try { return jwt.verify(m[1], process.env.ADMIN_JWT_SECRET); }
-  catch { return null; }
-}
-
-// อ่าน products จาก KV ให้ได้เป็น array เสมอ (KV อาจเก็บเป็น string หรือ {value:'...'})
-async function readProducts() {
-  let data = await kvGet("products");
   try {
-    // กรณี KV คืน { value: '...' }
-    if (data && typeof data === "object" && "value" in data) {
-      const raw = data.value;
-      data = typeof raw === "string" ? JSON.parse(raw || "[]") : Array.isArray(raw) ? raw : [];
-    }
-    // กรณี KV คืนเป็น string ตรง ๆ
-    else if (typeof data === "string") {
-      data = JSON.parse(data || "[]");
-    }
-  } catch { data = []; }
-  if (!Array.isArray(data)) data = [];
-  return data;
-}
-
-async function writeProducts(items) {
-  await kvSet("products", JSON.stringify(items || []));
-}
-
-function pad(n, w = 4) {
-  return String(n).padStart(w, "0");
-}
-
-// เคลียร์/บังคับฟิลด์ให้ครบ
-function normalizeOne(p = {}) {
-  const title = (p.title ?? p.name ?? "").toString().trim();
-  const type  = (p.type ?? p.category ?? "DVD").toString().trim();
-  const price = Number(p.price ?? 0) || 0;
-  const qty   = Number(p.qty ?? 0) || 0;
-
-  let images = [];
-  if (Array.isArray(p.images)) images = p.images.filter(Boolean);
-  else images = [p.image1, p.image2, p.image3, p.image4, p.image5].filter(Boolean);
-
-  const cover   = images[0] ?? p.cover ?? "";
-  const youtube = (p.youtube ?? p.youtubeUrl ?? "").toString();
-  const detail  = (p.detail ?? p.description ?? "").toString();
-
-  return { ...p, title, type, price, qty, images, cover, youtube, detail };
-}
-
-function readBody(req) {
-  if (typeof req.body === "string") {
-    try { return JSON.parse(req.body || "{}"); } catch { return {}; }
+    return jwt.verify(m[1], process.env.ADMIN_JWT_SECRET);
+  } catch {
+    return null;
   }
-  return req.body || {};
 }
 
-// ---------- handler ----------
 export default async function handler(req, res) {
   try {
-    // GET: ทุกคนใช้ได้
+    // ---------- GET: list products ----------
     if (req.method === "GET") {
-      const items = await readProducts();
+      // อาจเป็น { value: "..." } หรือ string/null
+      const raw = await kvGet("products");
+      let items = [];
+
+      if (raw?.value) {
+        // เคส Upstash KV แบบ { value: "..." }
+        items = JSON.parse(raw.value || "[]");
+      } else if (typeof raw === "string") {
+        // เคสเป็น string ตรง ๆ
+        items = JSON.parse(raw || "[]");
+      } else if (Array.isArray(raw)) {
+        // เคสเป็น array อยู่แล้ว
+        items = raw;
+      } else {
+        items = [];
+      }
+
       return res.json({ ok: true, items });
     }
 
-    // POST/PUT/DELETE: ต้องเป็น admin เท่านั้น
+    // ---------- ต้องเป็นแอดมิน สำหรับ POST / PUT / DELETE ----------
     const admin = verify(req);
-    if (!admin) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!admin) {
+      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    }
 
-    const items = await readProducts();
+    const body = JSON.parse(req.body || "{}");
+    let items = (await kvGet("products")) || [];
+    if (items?.value) {
+      items = JSON.parse(items.value || "[]");
+    } else if (typeof items === "string") {
+      items = JSON.parse(items || "[]");
+    } else if (!Array.isArray(items)) {
+      items = [];
+    }
 
+    // ---------- POST: create ----------
     if (req.method === "POST") {
-      const data = readBody(req);
-      // gen running id
-      let seq = Number(await kvGet("product:seq")) || 0;
+      let seq = (await kvGet("product:seq")) || 0;
       seq += 1;
-      await kvSet("product:seq", String(seq));
+      const id = "P" + String(seq).padStart(4, "0");
+      const now = Date.now();
 
-      const id = (data.type === "BD" || data.type === "Blu-ray" || data.type === "BLU-RAY")
-        ? `BR-${pad(seq)}` : `DVD-${pad(seq)}`;
+      const product = {
+        id,
+        title: body.title || "",
+        type: body.type || "DVD",
+        price: Number(body.price) || 0,
+        qty: Number(body.qty) || 0,
+        cover: body.cover || "",
+        images: Array.isArray(body.images) ? body.images : [],
+        youtube: body.youtube || "",
+        detail: body.detail || "",
+        createdAt: now,
+        updatedAt: now,
+      };
 
-      const product = normalizeOne({ id, ...data });
-      items.unshift(product);
-      await writeProducts(items);
-      return res.json({ ok: true, product });
+      // ถ้ายังไม่มี title (กันอินพุตว่าง)
+      if (!product.title) product.title = id;
+
+      items.push(product);
+      await kvSet("products", JSON.stringify(items));
+      await kvSet("product:seq", seq);
+      return res.json({ ok: true, item: product });
     }
 
+    // ---------- PUT: update ----------
     if (req.method === "PUT") {
-      const data = readBody(req);
-      const { id } = data || {};
-      if (!id) return res.status(400).json({ ok: false, error: "Missing id" });
-
-      const idx = items.findIndex(p => p.id === id);
-      if (idx === -1) return res.status(404).json({ ok: false, error: "Not found" });
-
-      items[idx] = normalizeOne({ ...items[idx], ...data });
-      await writeProducts(items);
-      return res.json({ ok: true, product: items[idx] });
+      const { id } = body;
+      const i = items.findIndex((x) => x.id === id);
+      if (i === -1) {
+        return res.status(404).json({ ok: false, error: "Not found" });
+      }
+      items[i] = { ...items[i], ...body, updatedAt: Date.now() };
+      await kvSet("products", JSON.stringify(items));
+      return res.json({ ok: true, item: items[i] });
     }
 
+    // ---------- DELETE: remove ----------
     if (req.method === "DELETE") {
-      const data = readBody(req);
-      const { id } = data || {};
-      if (!id) return res.status(400).json({ ok: false, error: "Missing id" });
-
-      const next = items.filter(p => p.id !== id);
-      await writeProducts(next);
-      return res.json({ ok: true, removed: id, count: next.length });
+      const { id } = body;
+      const next = items.filter((x) => x.id !== id);
+      await kvSet("products", JSON.stringify(next));
+      return res.json({ ok: true });
     }
 
+    // ---------- method อื่น ----------
     return res.status(405).json({ ok: false, error: "Method Not Allowed" });
-  } catch (e
-::contentReference[oaicite:0]{index=0}
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+}
