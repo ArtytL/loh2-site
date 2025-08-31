@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
-const API = import.meta.env?.VITE_API_URL || "/api";
+const API = "/api";
 
 export default function Product() {
   const { id } = useParams();
