@@ -1,7 +1,7 @@
 // src/pages/Admin.jsx
 import { useEffect, useMemo, useState } from "react";
 
-const API = import.meta.env?.VITE_API_URL || "/api";
+const API = "/api";
 
 // ---- utils -------------------------------------------------
 function toArray(x) {
