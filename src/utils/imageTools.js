@@ -1,28 +1,11 @@
 // src/utils/imageTools.js
-export const NO_IMAGE =
-  "https://fakeimg.pl/800x450/?text=No%20Image&font=arial";
+export const NO_IMAGE = "/no-image.png";
 
-// แปลงลิงก์ Google Drive (แบบ file/d/<ID>/view) ให้กลายเป็นลิงก์รูปโดยตรง
-export function toImageURL(input = "") {
-  if (!input) return NO_IMAGE;
-
-  try {
-    const u = new URL(input);
-
-    // ลิงก์ Google Drive
-    if (u.hostname.includes("drive.google.com")) {
-      const m = input.match(/\/d\/([^/]+)/); // ดึง <FILE_ID>
-      if (m) return `https://drive.google.com/uc?export=view&id=${m[1]}`;
-    }
-
-    // ลิงก์รูปตรงจาก Google (googleusercontent)
-    if (u.hostname.includes("googleusercontent.com")) {
-      return input;
-    }
-
-    // ลิงก์จากที่อื่น (imgur, cloudinary ฯลฯ) ใช้ได้เลย
-    return input;
-  } catch {
-    return NO_IMAGE;
-  }
+export function toImageURL(cover) {
+  if (!cover) return NO_IMAGE;
+  // ถ้าเป็น URL เต็มอยู่แล้ว (http/https) ก็ใช้ตามนั้น
+  if (/^https?:\/\//i.test(cover)) return cover;
+  // ถ้าเป็นแค่ชื่อไฟล์ ให้ชี้ไปที่ public/covers
+  const filename = String(cover).replace(/^\/?covers\//i, "");
+  return `/covers/${filename}`;
 }
