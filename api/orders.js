@@ -1,60 +1,36 @@
-// api/orders.js
-import jwt from "jsonwebtoken";
-import { kvGet, kvSet } from "./_utils/kv.js";
-
-export const config = { runtime: 'nodejs' };
-
-function verify(req) {
-  const h = req.headers.authorization || "";
-  const m = h.match(/^Bearer (.+)$/i);
-  if (!m) return null;
-  try {
-    return jwt.verify(m[1], process.env.ADMIN_JWT_SECRET);
-  } catch {
-    return null;
-  }
-}
+// /api/orders.js
+export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
   try {
-    // ลูกค้า (Checkout.jsx) เรียก POST มาเก็บออเดอร์ไว้แล้ว — ใช้ต่อได้
-    if (req.method === "POST") {
-      const order = JSON.parse(req.body || "{}");
-      const list = (await kvGet("orders")) || [];
-      list.push(order);
-      await kvSet("orders", list);
-      return res.json({ ok: true });
+    if (req.method !== "POST") {
+      return res.status(405).json({ ok: false, error: "Method Not Allowed" });
     }
 
-    if (req.method === "GET") {
-      // ดูรายการออเดอร์ (แอดมิน)
-      const admin = verify(req);
-      if (!admin) return res.status(401).json({ ok: false, error: "Unauthorized" });
-      const list = (await kvGet("orders")) || [];
-      return res.json({ ok: true, items: list });
+    // ✅ รองรับทั้งกรณีที่เป็น string และ object
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body || "{}")
+        : (req.body || {});
+
+    const { name, email, phone, address, cart, shipping, total, note } = body;
+
+    // ✅ ตรวจสอบข้อมูลพื้นฐาน
+    if (!name || !phone || !address || !Array.isArray(cart) || cart.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: "Bad payload: ต้องมี name/phone/address และ cart (array) อย่างน้อย 1 รายการ",
+      });
     }
 
-    if (req.method === "PATCH") {
-      // อัปเดตสถานะ (แอดมิน)
-      const admin = verify(req);
-      if (!admin) return res.status(401).json({ ok: false, error: "Unauthorized" });
+    // TODO: ตรงนี้คุณคงมีโค้ดส่งอีเมล/บันทึกออเดอร์อยู่แล้ว
+    // ใส่ต่อจากนี้ได้ตามเดิม เช่น nodemailer ฯลฯ
+    // await sendOrderEmail({ name, email, phone, address, cart, shipping, total, note });
 
-      const { orderId, paid, shipped } = JSON.parse(req.body || "{}");
-      const list = (await kvGet("orders")) || [];
-      const idx = list.findIndex((x) => x.orderId === orderId);
-      if (idx < 0) return res.status(404).json({ ok: false, error: "Not found" });
-
-      list[idx] = {
-        ...list[idx],
-        paid: paid ?? list[idx].paid,
-        shipped: shipped ?? list[idx].shipped,
-        updatedAt: Date.now(),
-      };
-      await kvSet("orders", list);
-      return res.json({ ok: true, item: list[idx] });
-    }
-
-    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    return res.status(200).json({
+      ok: true,
+      received: { items: cart.length, total },
+    });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e) });
   }
