@@ -1,4 +1,6 @@
-// /api/orders.js
+// api/orders.js
+import { kvGet, kvSet } from "./_utils/kv.js";
+
 export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
@@ -7,30 +9,57 @@ export default async function handler(req, res) {
       return res.status(405).json({ ok: false, error: "Method Not Allowed" });
     }
 
-    // ✅ รองรับทั้งกรณีที่เป็น string และ object
+    // รองรับทั้งกรณี body เป็น string และเป็น object
+    const raw = req.body;
     const body =
-      typeof req.body === "string"
-        ? JSON.parse(req.body || "{}")
-        : (req.body || {});
+      typeof raw === "string" ? JSON.parse(raw || "{}") : (raw || {});
 
-    const { name, email, phone, address, cart, shipping, total, note } = body;
+    // ดึงฟิลด์จาก body (มีค่าเริ่มต้นกันพัง)
+    const {
+      name = "",
+      email = "",
+      phone = "",
+      address = "",
+      note = "",
+      cart = [],
+      shipping = 0,
+      total = 0,
+    } = body;
 
-    // ✅ ตรวจสอบข้อมูลพื้นฐาน
-    if (!name || !phone || !address || !Array.isArray(cart) || cart.length === 0) {
-      return res.status(400).json({
-        ok: false,
-        error: "Bad payload: ต้องมี name/phone/address และ cart (array) อย่างน้อย 1 รายการ",
-      });
+    if (!Array.isArray(cart) || cart.length === 0) {
+      return res.status(400).json({ ok: false, error: "EMPTY_CART" });
     }
 
-    // TODO: ตรงนี้คุณคงมีโค้ดส่งอีเมล/บันทึกออเดอร์อยู่แล้ว
-    // ใส่ต่อจากนี้ได้ตามเดิม เช่น nodemailer ฯลฯ
-    // await sendOrderEmail({ name, email, phone, address, cart, shipping, total, note });
+    // รันเลขออเดอร์ L0001, L0002, ...
+    let seq = (await kvGet("order:seq")) || 0;
+    seq = Number(seq) || 0;
+    seq += 1;
+    const id = `L${String(seq).padStart(4, "0")}`;
 
-    return res.status(200).json({
-      ok: true,
-      received: { items: cart.length, total },
-    });
+    const order = {
+      id,
+      name,
+      email,
+      phone,
+      address,
+      note,
+      cart,
+      shipping: Number(shipping) || 0,
+      total: Number(total) || 0,
+      createdAt: Date.now(),
+      paid: false,
+      shipped: false,
+    };
+
+    // เก็บลง KV (เก็บทั้งรายการทั้งหมด และเลขล่าสุด)
+    const orders = (await kvGet("orders")) || [];
+    orders.push(order);
+    await kvSet([
+      ["orders", orders],
+      ["order:seq", seq],
+    ]);
+
+    return res.json({ ok: true, order });
   } catch (e) {
     return res.status(500).json({ ok: false, error: String(e) });
   }
