@@ -1,27 +1,33 @@
 // src/pages/Checkout.jsx
-import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api";
+import React, { useEffect, useMemo, useState } from "react";
 
-function loadCart() {
+/** ตั้งค่าเริ่มต้น */
+const SHIPPING = Number(import.meta.env.VITE_SHIPPING_FEE ?? 50);
+
+/** helper แปลงราคา */
+const fmt = (n) =>
+  (Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 0 });
+
+/** อ่าน/เขียนตะกร้าจาก localStorage (รองรับทั้ง CART และ cart) */
+function readCart() {
   try {
-    const raw = localStorage.getItem("cart");
-    const arr = JSON.parse(raw || "[]");
-    if (Array.isArray(arr)) return arr;
-    return [];
+    const str =
+      localStorage.getItem("CART") ?? localStorage.getItem("cart") ?? "[]";
+    return JSON.parse(str) || [];
   } catch {
     return [];
   }
 }
-
-function saveCart(arr) {
-  localStorage.setItem("cart", JSON.stringify(arr || []));
+function writeCart(items) {
+  const str = JSON.stringify(items || []);
+  localStorage.setItem("CART", str);
+  localStorage.setItem("cart", str); // เขียนซ้ำให้ทั้งสอง key
 }
 
 export default function Checkout() {
-  const [cart, setCart] = useState(() => loadCart());
-  const [sending, setSending] = useState(false);
-  const [msg, setMsg] = useState("");
+  const [cart, setCart] = useState(() => readCart());
 
+  // ฟอร์มลูกค้า
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -30,245 +36,278 @@ export default function Checkout() {
     note: "",
   });
 
-  // ค่าขนส่งจาก ENV (ตั้งใน Vercel เป็น VITE_SHIPPING_FEE) ไม่งั้นใช้ 50
-  const SHIPPING = useMemo(() => {
-    const v = Number(import.meta.env.VITE_SHIPPING_FEE || 50);
-    return Number.isFinite(v) ? v : 50;
-  }, []);
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  const subtotal = useMemo(() => {
-    return (cart || []).reduce((s, p) => {
-      const qty = Number(p.qty || 1);
-      const price = Number(p.price || 0);
-      return s + qty * price;
-    }, 0);
+  /** ยอดรวมสินค้า */
+  const itemsTotal = useMemo(
+    () => cart.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 1), 0),
+    [cart]
+  );
+  const grandTotal = itemsTotal + SHIPPING;
+
+  useEffect(() => {
+    // sync ตะกร้ากลับ localStorage ทุกครั้งที่มีการแก้ไข
+    writeCart(cart);
   }, [cart]);
 
-  const grand = useMemo(() => subtotal + (cart.length > 0 ? SHIPPING : 0), [subtotal, SHIPPING, cart.length]);
+  /** ลบสินค้า 1 รายการ */
+  const removeItem = (id) => {
+    setCart((list) => list.filter((it) => it.id !== id));
+  };
 
-  // sync cart เมื่อ localStorage ถูกอัปเดต (กรณีกดเพิ่ม/ลบจากหน้ารายการแล้วค่อยมาเช็คเอาต์)
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === "cart") {
-        setCart(loadCart());
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  /** เปลี่ยนจำนวน */
+  const changeQty = (id, qty) => {
+    setCart((list) =>
+      list.map((it) => (it.id === id ? { ...it, qty: Math.max(1, Number(qty) || 1) } : it))
+    );
+  };
 
-  async function onSubmit(e) {
+  /** onChange ฟอร์ม */
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
+  };
+
+  /** ส่งออเดอร์ไป API (JSON) */
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setMsg("");
-    if (cart.length === 0) {
-      setMsg("ตะกร้าว่าง — กรุณาเลือกสินค้า");
+    if (!cart.length) {
+      setMsg("ตะกร้าว่าง");
       return;
     }
-    if (!form.name || !form.phone || !form.address) {
-      setMsg("กรุณากรอก ชื่อ, เบอร์โทร และที่อยู่จัดส่ง ให้ครบถ้วน");
+    if (!form.name || !form.email || !form.phone || !form.address) {
+      setMsg("กรอกข้อมูลให้ครบก่อนส่ง");
       return;
     }
 
-    setSending(true);
     try {
+      setSending(true);
+
+      // เตรียม payload
       const payload = {
         name: form.name,
         email: form.email,
         phone: form.phone,
         address: form.address,
         note: form.note,
-        cart,
-        shipping: SHIPPING,
-        total: grand,
+        cart,               // [{ id, title, type, qty, price, ... }]
+        shipping: SHIPPING, // ค่าส่ง
+        total: grandTotal,  // ยอดรวมสุทธิ
       };
 
-      const res = await apiFetch("/api/orders", {
+      const res = await fetch("/api/orders", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.ok === false) {
-        throw new Error(data?.error || `${res.status} ${res.statusText}`);
+      // รองรับ error ที่ไม่ใช่ JSON ด้วย
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error("เซิร์ฟเวอร์ตอบกลับไม่ใช่ JSON");
       }
 
-      setMsg("ส่งคำสั่งซื้อเรียบร้อย ✅ กรุณาตรวจสอบอีเมล/กล่องจดหมาย");
-      // เคลียร์ตะกร้า
-      setCart([]);
-      saveCart([]);
-      // เคลียร์ฟอร์ม
-      setForm({ name: "", email: "", phone: "", address: "", note: "" });
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "ส่งคำสั่งซื้อไม่สำเร็จ");
+      }
+
+      // สำเร็จ
+      setMsg(`✅ ส่งคำสั่งซื้อเรียบร้อย! เลขที่ออเดอร์: ${data.id ?? "-"}`);
+      setCart([]);           // ล้างตะกร้า
+      writeCart([]);         // sync localStorage
     } catch (err) {
-      setMsg(`ส่งคำสั่งซื้อไม่สำเร็จ: ${String(err)}`);
+      setMsg(`❌ ${String(err.message || err)}`);
     } finally {
       setSending(false);
     }
-  }
+  };
 
+  /** UI */
   return (
-    <div style={{ maxWidth: 960, margin: "24px auto", padding: 16 }}>
-      <h2>เช็คเอาต์</h2>
+    <section style={{ maxWidth: 900, margin: "24px auto", padding: 16 }}>
+      <h1>เช็คเอาต์</h1>
 
-      {msg && (
-        <p style={{ color: msg.includes("ไม่สำเร็จ") ? "#c00" : "#0a0", marginTop: 8, marginBottom: 16 }}>
-          {msg}
-        </p>
-      )}
-
-      {/* ตารางตะกร้า */}
-      <div style={{ marginBottom: 24, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+      {/* ตารางสินค้าในตะกร้า */}
+      <div style={{ overflowX: "auto", margin: "16px 0 24px" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            border: "1px solid #eee",
+          }}
+        >
           <thead>
-            <tr style={{ background: "#f7f7f7" }}>
+            <tr style={{ background: "#f6f6f6" }}>
               <th style={th}>รหัส</th>
               <th style={th}>ชื่อ</th>
               <th style={th}>ประเภท</th>
-              <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
-              <th style={{ ...th, textAlign: "right" }}>ราคา</th>
+              <th style={th}>จำนวน</th>
+              <th style={th}>ราคา</th>
+              <th style={th}></th>
             </tr>
           </thead>
           <tbody>
-            {cart.map((p) => (
-              <tr key={p.id} style={{ borderTop: "1px solid #eee" }}>
-                <td style={td}>{p.id}</td>
-                <td style={td}>{p.title || p.name || "-"}</td>
-                <td style={td}>{p.type || "-"}</td>
-                <td style={{ ...td, textAlign: "right" }}>{Number(p.qty || 1)}</td>
+            {cart.map((it) => (
+              <tr key={it.id}>
+                <td style={td}>{it.id}</td>
+                <td style={td}>{it.title || "-"}</td>
+                <td style={td}>{it.type || "-"}</td>
+                <td style={td}>
+                  <input
+                    type="number"
+                    min={1}
+                    value={Number(it.qty || 1)}
+                    onChange={(e) => changeQty(it.id, e.target.value)}
+                    style={{ width: 64, textAlign: "right" }}
+                  />
+                </td>
                 <td style={{ ...td, textAlign: "right" }}>
-                  {Number(p.price || 0).toLocaleString("th-TH")}
+                  {fmt((it.qty || 1) * (it.price || 0))}
+                </td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  <button onClick={() => removeItem(it.id)}>ลบ</button>
                 </td>
               </tr>
             ))}
-            <tr style={{ borderTop: "1px solid #eee" }}>
-              <td style={td} colSpan={4}>
-                รวมค่าสินค้า
-              </td>
-              <td style={{ ...td, textAlign: "right" }}>{subtotal.toLocaleString("th-TH")}</td>
-            </tr>
+
+            {/* รวมสินค้า */}
             <tr>
               <td style={td} colSpan={4}>
-                ค่าจัดส่ง
+                รวมสินค้า
               </td>
-              <td style={{ ...td, textAlign: "right" }}>
-                {cart.length > 0 ? SHIPPING.toLocaleString("th-TH") : 0}
+              <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>
+                {fmt(itemsTotal)}
               </td>
+              <td style={td}></td>
             </tr>
+
+            {/* ค่าส่ง */}
+            <tr>
+              <td style={td} colSpan={4}>
+                ค่าส่ง
+              </td>
+              <td style={{ ...td, textAlign: "right" }}>{fmt(SHIPPING)}</td>
+              <td style={td}></td>
+            </tr>
+
+            {/* รวมสุทธิ */}
             <tr>
               <td style={{ ...td, fontWeight: 700 }} colSpan={4}>
-                ยอดชำระรวม
+                รวมสุทธิ
               </td>
               <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>
-                {grand.toLocaleString("th-TH")}
+                {fmt(grandTotal)}
               </td>
+              <td style={td}></td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      {/* ฟอร์มข้อมูลผู้ซื้อ */}
-      <form onSubmit={onSubmit} style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
-        <h3>ข้อมูลผู้สั่งซื้อ / ที่อยู่จัดส่ง</h3>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label>
-            ชื่อ-นามสกุล
-            <input
-              style={input}
-              required
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </label>
-          <label>
-            อีเมล
-            <input
-              style={input}
-              type="email"
-              required
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-            />
-          </label>
-          <label>
-            เบอร์โทร
-            <input
-              style={input}
-              required
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
-          </label>
-          <div />
+      {/* ฟอร์มลูกค้า */}
+      <form onSubmit={handleSubmit} style={{ marginTop: 24 }}>
+        <div style={row}>
+          <label style={label}>ชื่อ-นามสกุล</label>
+          <input
+            name="name"
+            value={form.name}
+            onChange={onChange}
+            required
+            style={input}
+          />
         </div>
 
-        <label style={{ display: "block", marginTop: 12 }}>
-          ที่อยู่จัดส่ง
-          <textarea
-            style={textarea}
-            rows={3}
-            required
-            value={form.address}
-            onChange={(e) => setForm({ ...form, address: e.target.value })}
-          />
-        </label>
-
-        <label style={{ display: "block", marginTop: 12 }}>
-          หมายเหตุ (ถ้ามี)
+        <div style={row}>
+          <label style={label}>อีเมล</label>
           <input
+            type="email"
+            name="email"
+            value={form.email}
+            onChange={onChange}
+            required
             style={input}
-            value={form.note}
-            onChange={(e) => setForm({ ...form, note: e.target.value })}
           />
-        </label>
+        </div>
+
+        <div style={row}>
+          <label style={label}>เบอร์โทร</label>
+          <input
+            name="phone"
+            value={form.phone}
+            onChange={onChange}
+            required
+            style={input}
+          />
+        </div>
+
+        <div style={row}>
+          <label style={label}>ที่อยู่จัดส่ง</label>
+          <textarea
+            rows={3}
+            name="address"
+            value={form.address}
+            onChange={onChange}
+            required
+            style={{ ...input, height: 96 }}
+          />
+        </div>
+
+        <div style={row}>
+          <label style={label}>หมายเหตุ (ถ้ามี)</label>
+          <input
+            name="note"
+            value={form.note}
+            onChange={onChange}
+            style={input}
+          />
+        </div>
 
         <button
           type="submit"
-          style={btn}
-          disabled={sending || cart.length === 0}
-          title={cart.length === 0 ? "ไม่มีสินค้าในตะกร้า" : "ส่งคำสั่งซื้อ"}
+          disabled={sending || !cart.length}
+          style={{
+            width: "100%",
+            padding: 14,
+            background: "#111",
+            color: "#fff",
+            borderRadius: 10,
+            border: "1px solid #111",
+            cursor: sending ? "not-allowed" : "pointer",
+          }}
         >
-          {sending ? "กำลังส่งคำสั่งซื้อ..." : "ยืนยันคำสั่งซื้อ"}
+          {sending ? "กำลังส่งสั่งซื้อ..." : "ส่งสั่งซื้อ"}
         </button>
+
+        {msg && (
+          <p style={{ marginTop: 12, color: msg.startsWith("✅") ? "green" : "#c00" }}>
+            {msg}
+          </p>
+        )}
       </form>
-    </div>
+    </section>
   );
 }
 
-/* ---------------- styles (inline object) ---------------- */
-
+/** สไตล์เล็กน้อย */
 const th = {
-  textAlign: "left",
-  padding: 12,
-  fontWeight: 700,
+  padding: "12px 10px",
   borderBottom: "1px solid #eee",
+  textAlign: "left",
 };
-
 const td = {
-  padding: 12,
-  verticalAlign: "top",
+  padding: "10px",
+  borderBottom: "1px solid #f0f0f0",
 };
-
+const row = { marginBottom: 12 };
+const label = { display: "block", marginBottom: 6, fontWeight: 600 };
 const input = {
   width: "100%",
-  border: "1px solid #ddd",
-  borderRadius: 10,
   padding: "10px 12px",
-  marginTop: 6,
+  border: "1px solid #ddd",
+  borderRadius: 8,
   outline: "none",
-};
-
-const textarea = {
-  ...input,
-  resize: "vertical",
-};
-
-const btn = {
-  width: "100%",
-  marginTop: 16,
-  padding: "14px 18px",
-  border: "0",
-  borderRadius: 12,
-  background: "#111",
-  color: "#fff",
-  cursor: "pointer",
 };
