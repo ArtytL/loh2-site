@@ -2,12 +2,21 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-const CANDIDATE_KEYS = ["CART", "cart", "cartItems", "SHOP_CART"];
 const SHIPPING_FLAT = 50;
 
-/* ---------- cart utils (ทนทานกับรูปแบบเดิม ๆ) ---------- */
+/* ----------------- helpers: coerce & scan ----------------- */
+function isPlainObject(v) {
+  return v && typeof v === "object" && !Array.isArray(v);
+}
+function looksLikeItem(x) {
+  if (!isPlainObject(x)) return false;
+  const hasId = "id" in x || "code" in x || "sku" in x;
+  const hasTitle = "title" in x || "name" in x;
+  const hasPrice = "price" in x || "unitPrice" in x;
+  return hasId && hasTitle && hasPrice;
+}
 function coerceItem(x) {
-  if (!x || typeof x !== "object") return null;
+  if (!isPlainObject(x)) return null;
   const id = x.id ?? x.code ?? x.sku ?? "";
   const title = x.title ?? x.name ?? "";
   const type = x.type ?? x.category ?? "DVD";
@@ -17,71 +26,75 @@ function coerceItem(x) {
   if (!id || !title) return null;
   return { id, title, type, qty, price, cover };
 }
-
-function normalizeCart(src) {
-  // array ตรง ๆ
-  if (Array.isArray(src)) {
-    const items = src.map(coerceItem).filter(Boolean);
-    return items;
-  }
-  // รูปแบบ { items: [...] }
-  if (src && Array.isArray(src.items)) {
-    const items = src.items.map(coerceItem).filter(Boolean);
-    return items;
-  }
-  return [];
+function tryParseJSON(s) {
+  try { return JSON.parse(s); } catch { return null; }
 }
 
-function parseJSON(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    try {
-      // บางกรณี string ซ้อน string
-      return JSON.parse(String(s || ""));
-    } catch {
-      return null;
+/** เดินสำรวจโครงสร้าง แล้วเก็บ "ทุก array ที่น่าจะเป็นรายการสินค้า" */
+function collectCandidateArrays(node, out = []) {
+  if (!node) return out;
+  if (Array.isArray(node)) {
+    // ถ้าใน array มีอย่างน้อย 1 ชิ้นที่เหมือนรายการสินค้า ถือว่าเป็นผู้ต้องสงสัย
+    if (node.some(looksLikeItem)) out.push(node);
+  } else if (isPlainObject(node)) {
+    for (const k of Object.keys(node)) collectCandidateArrays(node[k], out);
+  }
+  return out;
+}
+
+/** สแกนทุก ๆ key ใน storage แล้วดึง cart แรกที่ “มีของจริง” ออกมา */
+function scanStorage(storage) {
+  const found = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    const raw = storage.getItem(k);
+    const val = tryParseJSON(raw);
+    if (!val) continue;
+    const candidates = collectCandidateArrays(val);
+    for (const arr of candidates) {
+      const items = arr.map(coerceItem).filter(Boolean);
+      if (items.length) found.push({ key: k, items });
     }
   }
+  return found;
 }
 
-function loadFromStorage(storage) {
-  for (const k of CANDIDATE_KEYS) {
-    const raw = storage.getItem(k);
-    if (!raw) continue;
-    const val = parseJSON(raw);
-    const items = normalizeCart(val);
-    if (items.length) return items;
-  }
-  return [];
-}
-
+/** รวมทุกทาง: localStorage, sessionStorage, window globals */
 function loadCartResilient() {
   // 1) localStorage
-  let items = loadFromStorage(window.localStorage);
-  if (items.length) return items;
+  const foundLS = scanStorage(window.localStorage);
+  if (foundLS.length) return foundLS[0].items;
+
   // 2) sessionStorage
-  items = loadFromStorage(window.sessionStorage);
-  if (items.length) return items;
+  const foundSS = scanStorage(window.sessionStorage);
+  if (foundSS.length) return foundSS[0].items;
+
+  // 3) window globals ที่คนชอบใช้
+  const globs = [ "CART", "cart", "cartItems", "SHOP_CART", "__CART__", "__cart__" ];
+  for (const g of globs) {
+    const v = window[g];
+    if (!v) continue;
+    const candidates = collectCandidateArrays(v);
+    for (const arr of candidates) {
+      const items = arr.map(coerceItem).filter(Boolean);
+      if (items.length) return items;
+    }
+  }
+
   return [];
 }
 
 function saveCart(items) {
-  try {
-    localStorage.setItem("CART", JSON.stringify(items));
-  } catch {}
+  // เขียนทับไว้ที่ key กลาง “CART” เพื่อให้หน้าอื่นอ่านได้
+  try { localStorage.setItem("CART", JSON.stringify({ items })); } catch {}
 }
 
-/* ---------- UI ---------- */
+/* ----------------- component ----------------- */
 const th = { textAlign: "left", padding: "10px 8px", whiteSpace: "nowrap" };
 const td = { padding: "10px 8px", verticalAlign: "middle" };
 const btn = {
-  padding: "10px 18px",
-  background: "#111",
-  color: "#fff",
-  border: 0,
-  borderRadius: 10,
-  cursor: "pointer",
+  padding: "10px 18px", background: "#111", color: "#fff",
+  border: 0, borderRadius: 10, cursor: "pointer"
 };
 
 export default function Checkout() {
@@ -94,29 +107,27 @@ export default function Checkout() {
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // เผื่อเข้าหน้านี้โดยยังไม่ได้รีเฟรช
+  // sync เมื่อมีการเปลี่ยน storage จากหน้าอื่น
   useEffect(() => {
-    setCart(loadCartResilient());
+    const onStorage = () => setCart(loadCartResilient());
+    window.addEventListener("storage", onStorage);
+    // โหลดซ้ำอีกครั้งหลัง mount เผื่อ header อัปเดตช้ากว่า
+    const t = setTimeout(() => setCart(loadCartResilient()), 100);
+    return () => { window.removeEventListener("storage", onStorage); clearTimeout(t); };
   }, []);
 
-  useEffect(() => {
-    saveCart(cart);
-  }, [cart]);
+  useEffect(() => { saveCart(cart); }, [cart]);
 
   const subTotal = useMemo(
     () => cart.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 0), 0),
     [cart]
   );
-  const shipping = useMemo(() => (cart.length ? SHIPPING_FLAT : 0), [cart.length]);
+  const shipping = cart.length ? SHIPPING_FLAT : 0;
   const total = subTotal + shipping;
 
   const setQty = (i, v) => {
     const n = Math.max(1, Number(v || 1));
-    setCart((old) => {
-      const c = [...old];
-      c[i] = { ...c[i], qty: n };
-      return c;
-    });
+    setCart((old) => { const c = [...old]; c[i] = { ...c[i], qty: n }; return c; });
   };
   const inc = (i) => setQty(i, (Number(cart[i].qty || 1) + 1));
   const dec = (i) => setQty(i, (Number(cart[i].qty || 1) - 1));
@@ -153,10 +164,9 @@ export default function Checkout() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      let d;
-      try { d = await r.json(); } catch { d = { ok: r.ok }; }
+      let d; try { d = await r.json(); } catch { d = { ok: r.ok }; }
 
-      // 2) fallback text/plain
+      // 2) ถ้า backend คาดหวัง text/plain แบบที่เราเคยทดสอบ
       if (!d?.ok) {
         r = await fetch("/api/orders", {
           method: "POST",
@@ -180,7 +190,7 @@ export default function Checkout() {
 
   return (
     <div className="container-max" style={{ padding: "12px 12px 40px" }}>
-      {/* ใช้ header หลักของเว็บเดิม — ที่นี่ไม่วาดหัวใหม่ จึงไม่ซ้อน */}
+      {/* ใช้ header หลักของเว็บ หน้านี้ไม่สร้างหัวซ้อน */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
         <h1 className="h1" style={{ margin: 0 }}>แจ้งโอน</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -214,9 +224,7 @@ export default function Checkout() {
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                     <button type="button" onClick={() => dec(i)} aria-label="ลด">−</button>
                     <input
-                      type="number"
-                      min={1}
-                      value={it.qty}
+                      type="number" min={1} value={it.qty}
                       onChange={(e) => setQty(i, e.target.value)}
                       style={{ width: 70, padding: 6 }}
                     />
@@ -285,7 +293,6 @@ function Field({ label, value, onChange, placeholder }) {
     </label>
   );
 }
-
 function Area({ label, value, onChange, rows = 4 }) {
   return (
     <label style={{ display: "grid", gap: 8 }}>
