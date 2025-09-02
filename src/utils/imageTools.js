@@ -1,4 +1,3 @@
-// src/utils/imageTools.js
 export const NO_IMAGE = "/no-image.svg";
 
 export function toImageURL(cover) {
