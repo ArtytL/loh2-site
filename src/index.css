@@ -1,38 +1,22 @@
-/* --- Cover Image box --- */
-.cover-box{
-  width: 100%;
-  aspect-ratio: 2 / 3;          /* กล่องแนวตั้ง 2:3 แบบปก DVD */
-  background: #eef1f4;          /* สีพื้นตอนยังโหลด */
-  border-radius: 10px;
-  overflow: hidden;             /* กันภาพล้น */
-  display: block;
-  position: relative;
-}
+/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* รูปด้านใน */
-.cover-box > img{
-  width: 100%;
-  height: 100%;
-  object-fit: contain;          /* <== คงอัตราส่วนเดิมของรูป (ไม่ตัด) */
-  display: block;
-  opacity: 0;                   /* ป้องกันกระพริบ */
-  transition: opacity .25s ease;
-}
+@layer components {
+  /* กล่องภาพปก สัดส่วน 2:3 (แนวตั้งแบบปก DVD) */
+  .cover-box{
+    @apply relative w-full overflow-hidden rounded-xl bg-gray-100;
+    aspect-ratio: 2 / 3; /* ล็อกสัดส่วนแนวตั้ง */
+  }
 
-/* เมื่อโหลดเสร็จค่อยเฟดให้เห็น */
-.cover-box > img[data-loaded="true"]{
-  opacity: 1;
-}
+  .cover-box > img{
+    @apply absolute inset-0 w-full h-full object-cover transition-transform duration-300;
+    /* object-position: center; // ไม่ต้องก็ได้ ค่า default = center */
+  }
 
-/* ใช้กับ grid การ์ด */
-.grid{
-  display: grid;
-  grid-template-columns: repeat(auto-fill,minmax(220px,1fr));
-  gap: 16px;
-}
-
-.card{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  /* ถ้าอยากทำ hover ซูมเล็กๆ (optional) */
+  .card:hover .cover-box > img{
+    transform: scale(1.03);
+  }
 }
