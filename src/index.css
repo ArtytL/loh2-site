@@ -1,43 +1,40 @@
 /* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* layout หลัก */
-.app { /* container มีขอบซ้าย-ขวา และห่างบน */
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
-  padding: 24px 16px; /* เว้นบน/ซ้ายที่ต้องการ */
+/* ฟอนต์ทั้งเว็บ: ใช้ Sukhumvit Set ถ้ามี, ตกลง Sarabun เพื่อความสวยงามทุกแพลตฟอร์ม */
+html, body {
+  font-family: "Sukhumvit Set","Sarabun",system-ui,-apple-system,"Segoe UI",
+    Roboto,"Helvetica Neue","Noto Sans Thai","Noto Sans",Arial,sans-serif;
+  @apply bg-white text-gray-900;
 }
 
-/* กริดการ์ดสินค้า */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(1, minmax(0, 1fr));
-  gap: 24px;
-}
-@media (min-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* ---------- Components (tailwind apply) ---------- */
+@layer components {
 
-/* การ์ด */
-.card {
-  background: #fff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 1px 6px rgba(0,0,0,.06);
+  /* กล่องภาพปกอัตราส่วน 2:3 (ปก DVD) */
+  .cover-box {
+    @apply relative w-full overflow-hidden rounded-2xl bg-gray-100;
+    aspect-ratio: 2 / 3;
+  }
+  .cover-box > img {
+    @apply absolute inset-0 w-full h-full object-cover;
+  }
+
+  /* ปุ่มหลัก */
+  .btn-primary {
+    @apply h-14 px-10 rounded-2xl bg-gray-900 text-white text-xl font-semibold
+      shadow-md hover:shadow-lg active:scale-[0.99] transition;
+  }
+
+  /* คอนเทนเนอร์และไทโป */
+  .container-max { @apply max-w-7xl mx-auto px-4 lg:px-8; }
+  .h1        { @apply text-4xl sm:text-5xl font-extrabold tracking-tight; }
+  .meta-line { @apply text-xl sm:text-2xl text-gray-600; }
+  .price-xl  { @apply text-4xl sm:text-5xl font-black text-gray-900; }
+  .desc      { @apply leading-8 text-[16.5px] whitespace-pre-line; }
 }
 
-/* กล่องรูป 2:3 (แนวตั้ง) + กันกระพริบด้วยการ fix กล่องไว้ก่อน */
-.cover-box{
-  position: relative;
-  width: 100%;
-  aspect-ratio: 2 / 3;            /* สัดส่วนปก DVD */
-  background: #e9ecf1;            /* ไลท์เกรย์ไว้แทนรูปตอนโหลด */
-  overflow: hidden;
-}
-.cover-box > img{
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  object-fit: cover;              /* คงอัตราส่วนเดิม ไม่บี้ */
-  transition: transform .3s ease; /* เผื่อทำ hover */
-}
-.card:hover .cover-box > img { transform: scale(1.03); } /* optional */
-
+/* เลือกใช้ได้: ย่อรูปเล็กตอน hover (เอฟเฟกต์เบา ๆ) */
+.card:hover .cover-box > img { transform: scale(1.03); transition: transform .25s; }
