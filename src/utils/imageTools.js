@@ -1,24 +1,50 @@
 // src/utils/imageTools.js
-export const NO_IMAGE = "/no-image.svg"; // หรือรูป placeholder ของคุณใน /public
 
-// แปลงค่า cover ที่กรอกมา → เป็น URL ที่เว็บโหลดได้จริง
+// รูป fallback (ต้องมีไฟล์นี้ใน /public)
+export const NO_IMAGE = "/no-image.svg";
+
+/**
+ * แปลงค่าจากช่อง "ปก (URL)" ให้กลายเป็น URL ที่เว็บโหลดได้จริง
+ * รองรับ:
+ *  - ชื่อไฟล์อย่างเดียว:            "unleash-3.jpg"
+ *  - พาธใต้ public/covers:          "covers/unleash-3.jpg"
+ *  - พาธที่เผลอใส่ public/src มา:  "public/covers/a.jpg", "src/public/covers/a.jpg"
+ *  - ลิงก์เต็ม http(s):             "https://.../a.jpg" (ปล่อยผ่าน)
+ */
 export function toImageURL(cover) {
   if (!cover) return NO_IMAGE;
 
-  // ถ้าเป็นลิงก์ http(s) อยู่แล้วก็ใช้ได้เลย (เช่น รูปจาก Google Drive ที่เปิดสาธารณะ)
-  if (/^https?:\/\//i.test(cover)) return cover;
+  const raw = String(cover).trim();
 
-  // ตัดโดเมน/โฟลเดอร์เกิน ๆ ที่ชอบใส่มา
-  // เช่น "https://xxx/app/public/covers/a.jpg", "public/covers/a.jpg", "src/public/covers/a.jpg"
-  let c = String(cover)
-    .replace(/^https?:\/\/[^/]+/i, "") // ตัดโดเมน
-    .replace(/^\/?public\//i, "")      // ตัด public/
-    .replace(/^\/?src\//i, "")         // กันพิมพ์ src/ มา
-    .replace(/^\/+/, "");              // ตัด / นำหน้า
+  // ถ้าเป็นลิงก์ http(s) อยู่แล้ว ใช้ได้เลย
+  if (/^https?:\/\/?/i.test(raw)) return raw; // ✅ แค่สองขีด // ก็พอ
 
-  // ถ้าพิมพ์มาแค่ชื่อไฟล์ ให้พาไปโฟลเดอร์ covers อัตโนมัติ
+  // เริ่ม normalize
+  let c = raw;
+
+  // ตัดโดเมน (ถ้าเผลอวางมาบางส่วน)
+  c = c.replace(/^https?:\/\/[^/]+/i, "");
+  // ตัด / นำหน้า
+  c = c.replace(/^\/+/, "");
+
+  // ถ้าในพาธมี "public/" ให้ตัดตั้งแต่ตรงนั้นไปข้างหน้า
+  {
+    const i = c.toLowerCase().lastIndexOf("public/");
+    if (i !== -1) c = c.slice(i + "public/".length);
+  }
+
+  // ถ้ามี "src/" ก็ทำแบบเดียวกัน
+  {
+    const i = c.toLowerCase().lastIndexOf("src/");
+    if (i !== -1) c = c.slice(i + "src/".length);
+  }
+
+  // ตัด / นำหน้าอีกรอบเผื่อ
+  c = c.replace(/^\/+/, "");
+
+  // ถ้าไม่ได้ขึ้นต้นด้วย covers/ ให้โยนเข้า covers/ อัตโนมัติ
   if (!/^covers\//i.test(c)) c = `covers/${c}`;
 
-  // รูปใต้ public เสิร์ฟจากรากเว็บเสมอ
+  // public เสิร์ฟจากรากเว็บเสมอ
   return `/${c}`;
 }
