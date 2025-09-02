@@ -3,23 +3,20 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toImageURL, NO_IMAGE } from "../utils/imageTools";
 
-// แปลง URL YouTube ให้เป็น embed เสมอ
+/* แปลง YouTube เป็น embed เสมอ */
 function toYoutubeEmbed(url) {
   if (!url) return null;
   try {
-    if (/\/embed\//.test(url)) return url; // เป็น embed อยู่แล้ว
-
+    if (/\/embed\//.test(url)) return url;
     if (/youtube\.com\/watch/.test(url)) {
       const u = new URL(url);
       const id = u.searchParams.get("v");
       return id ? `https://www.youtube.com/embed/${id}` : null;
     }
-
     if (/youtu\.be\//.test(url)) {
       const id = url.split("youtu.be/")[1].split(/[?&]/)[0];
       return id ? `https://www.youtube.com/embed/${id}` : null;
     }
-
     if (/youtube\.com\/shorts\//.test(url)) {
       const id = url.split("/shorts/")[1].split(/[?&]/)[0];
       return id ? `https://www.youtube.com/embed/${id}` : null;
@@ -35,7 +32,7 @@ export default function Product() {
   const [thumbs, setThumbs] = useState([]);
   const [qty, setQty] = useState(1);
 
-  // โหลดสินค้า
+  /* โหลดสินค้า */
   useEffect(() => {
     fetch("/api/products")
       .then((r) => r.json())
@@ -66,14 +63,12 @@ export default function Product() {
 
   const yt = useMemo(() => toYoutubeEmbed(item?.youtube), [item?.youtube]);
 
-  // เพิ่มลงตะกร้า
+  /* ตะกร้า */
   const addToCart = () => {
     if (!item) return;
     const n = Math.max(1, parseInt(qty || 1, 10));
     let cart = [];
-    try {
-      cart = JSON.parse(localStorage.getItem("cart") || "[]");
-    } catch {}
+    try { cart = JSON.parse(localStorage.getItem("cart") || "[]"); } catch {}
     const i = cart.findIndex((x) => x.id === item.id);
     if (i >= 0) cart[i].qty += n;
     else cart.push({ id: item.id, title: item.title, type: item.type, price: item.price, qty: n });
@@ -81,32 +76,29 @@ export default function Product() {
     alert("เพิ่มลงตะกร้าแล้ว");
   };
 
-  if (!item) return <div className="max-w-7xl mx-auto px-4 lg:px-8 py-10">กำลังโหลด…</div>;
+  if (!item) return <div className="container-max py-10">กำลังโหลด…</div>;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 lg:px-8 py-10">
-      <Link to="/catalog" className="text-blue-600 hover:underline">&larr; กลับไปรายการ</Link>
+    <div className="container-max py-10">
+      <Link to="/catalog" className="text-gray-500 hover:text-gray-900 hover:underline">
+        &larr; หน้าหลัก
+      </Link>
 
-      {/* โครงหน้า: เหมือนอีคอมเมิร์ซ — รูปซ้าย/รายละเอียดขวา */}
       <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(320px,560px),1fr]">
-        {/* ซ้าย: รูปใหญ่ + thumbnails (คงสัดส่วน 2:3) */}
+        {/* ซ้าย: รูปหลัก + แถว thumbnails อยู่ใต้ภาพ */}
         <div className="lg:sticky lg:top-8 self-start">
-          <div className="cover-box bg-gray-100 rounded-2xl border shadow-sm">
-            <img
-              src={main || NO_IMAGE}
-              alt={item.title}
-              onError={(e) => (e.currentTarget.src = NO_IMAGE)}
-            />
+          <div className="cover-box border rounded-2xl shadow-sm">
+            <img src={main || NO_IMAGE} alt={item.title}
+                 onError={(e) => (e.currentTarget.src = NO_IMAGE)} />
           </div>
 
-          {/* แถว thumbnails — อยู่ใต้รูปใหญ่ (ตามที่ขอ) */}
           {!!thumbs.length && (
             <div className="mt-4 grid grid-cols-5 sm:grid-cols-6 md:grid-cols-8 gap-2">
               {thumbs.map((u, i) => (
                 <button
                   key={i}
                   className={`cover-box rounded-xl overflow-hidden border transition ${
-                    u === main ? "ring-2 ring-indigo-500" : "hover:shadow"
+                    u === main ? "ring-2 ring-gray-900" : "hover:shadow"
                   }`}
                   onClick={() => setMain(u)}
                   title="ดูภาพนี้"
@@ -118,50 +110,41 @@ export default function Product() {
           )}
         </div>
 
-        {/* ขวา: ชื่อ/ราคา/จำนวน/ปุ่ม + รายละเอียด + YouTube */}
-        <div>
-          {/* หัวเรื่อง */}
-          <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">{item.title}</h1>
-          <div className="text-gray-500 mt-1">{item.type}</div>
-
-          {/* กล่อง CTA: ราคา / จำนวน / ปุ่มใส่ตะกร้า */}
-          <div className="mt-5 p-5 rounded-2xl border bg-amber-50/50">
-            <div className="flex flex-wrap items-center gap-5">
-              <div className="text-4xl sm:text-5xl font-extrabold text-rose-600">
-                {Number(item.price).toLocaleString()} <span className="text-2xl sm:text-3xl">บาท</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-gray-600">จำนวน</label>
-                <input
-                  type="number"
-                  min="1"
-                  className="w-24 h-12 border rounded-xl px-3 text-lg text-center"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                />
-              </div>
-
-              <button
-                onClick={addToCart}
-                className="h-12 px-10 rounded-2xl bg-black text-white text-lg font-semibold shadow-md hover:shadow-lg active:scale-[0.99] transition"
-              >
-                ใส่ตะกร้า
-              </button>
+        {/* ขวา: จัดเลย์เอาต์ให้ใกล้เคียงตัวอย่าง */}
+        <div className="space-y-6">
+          {/* หัวเรื่อง/จำนวน/ราคา/ปุ่ม */}
+          <header className="text-center lg:text-left space-y-3">
+            <h1 className="h1">{item.title}</h1>
+            <div className="meta-line">
+              จำนวน{" "}
+              <input
+                type="number"
+                min="1"
+                className="inline-block w-[72px] h-10 text-center border rounded-xl mx-1"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+              />{" "}
+              แผ่น
             </div>
-          </div>
+            <div className="price-xl">
+              ราคา <span className="text-5xl sm:text-6xl font-extrabold">
+                {Number(item.price).toLocaleString()}
+              </span>{" "}
+              บาท
+            </div>
+            <div className="pt-1">
+              <button className="btn-primary" onClick={addToCart}>ใส่ตะกร้า</button>
+            </div>
+          </header>
 
-          {/* รายละเอียด เน้นอ่านง่าย */}
+          {/* รายละเอียด */}
           {item.detail && (
-            <article className="mt-6 leading-7 text-[15px] whitespace-pre-line">
-              {item.detail}
-            </article>
+            <article className="desc">{item.detail}</article>
           )}
 
-          {/* YouTube ใหญ่ขึ้น (เต็มความกว้างคอลัมน์) */}
+          {/* YouTube ใหญ่ขึ้น (16:9) */}
           {yt && (
-            <div className="mt-8">
-              <h2 className="text-lg font-semibold mb-3">ตัวอย่างจาก YouTube</h2>
+            <section>
               <div className="relative w-full overflow-hidden rounded-2xl shadow-sm" style={{ paddingTop: "56.25%" }}>
                 <iframe
                   className="absolute inset-0 w-full h-full"
@@ -172,7 +155,7 @@ export default function Product() {
                   allowFullScreen
                 />
               </div>
-            </div>
+            </section>
           )}
         </div>
       </div>
