@@ -1,39 +1,37 @@
 // src/App.jsx
 import React from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
-import Header from "./components/Header";
-import { CartProvider } from "./context/CartContext";
-
-// เพจเดิมของคุณ
+import { HashRouter, Routes, Route, Link, Navigate } from "react-router-dom";
+import Home from "./pages/Home.jsx";
 import Catalog from "./pages/Catalog.jsx";
 import Product from "./pages/Product.jsx";
-import Checkout from "./pages/Checkout.jsx";
+import Transfer from "./pages/Transfer.jsx";
 import Admin from "./pages/Admin.jsx";
 
 export default function App() {
   return (
-    <CartProvider>
-      <Header />
+    <HashRouter>
+      <header className="site-header">
+        <div className="header-inner">
+          <Link className="brand" to="/">โล๊ะมือสอง</Link>
+          <div className="nav-right">
+            <Link className="btn-pay" to="/transfer">ชำระเงิน</Link>
+            <Link className="cart-link" to="/transfer">
+              ตะกร้า <span id="cart-count-badge" />
+            </Link>
+          </div>
+        </div>
+      </header>
 
-      <main className="container">
+      <main className="container-max">
         <Routes>
-          {/* หน้าแรก = แค็ตตาล็อกสินค้า */}
-          <Route path="/" element={<Catalog />} />
+          <Route path="/" element={<Home />} />
           <Route path="/catalog" element={<Catalog />} />
-
-          {/* รายละเอียดสินค้า */}
           <Route path="/product/:id" element={<Product />} />
-
-          {/* ชำระเงิน */}
-          <Route path="/checkout" element={<Checkout />} />
-
-          {/* หลังบ้าน (มีอยู่แล้ว) */}
+          <Route path="/transfer" element={<Transfer />} />
           <Route path="/admin" element={<Admin />} />
-
-          {/* กันหลงทาง */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-    </CartProvider>
+    </HashRouter>
   );
 }
