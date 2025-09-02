@@ -1,22 +1,43 @@
 /* src/index.css */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
-@layer components {
-  /* กล่องภาพปก สัดส่วน 2:3 (แนวตั้งแบบปก DVD) */
-  .cover-box{
-    @apply relative w-full overflow-hidden rounded-xl bg-gray-100;
-    aspect-ratio: 2 / 3; /* ล็อกสัดส่วนแนวตั้ง */
-  }
-
-  .cover-box > img{
-    @apply absolute inset-0 w-full h-full object-cover transition-transform duration-300;
-    /* object-position: center; // ไม่ต้องก็ได้ ค่า default = center */
-  }
-
-  /* ถ้าอยากทำ hover ซูมเล็กๆ (optional) */
-  .card:hover .cover-box > img{
-    transform: scale(1.03);
-  }
+/* layout หลัก */
+.app { /* container มีขอบซ้าย-ขวา และห่างบน */
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 24px 16px; /* เว้นบน/ซ้ายที่ต้องการ */
 }
+
+/* กริดการ์ดสินค้า */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 24px;
+}
+@media (min-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* การ์ด */
+.card {
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 6px rgba(0,0,0,.06);
+}
+
+/* กล่องรูป 2:3 (แนวตั้ง) + กันกระพริบด้วยการ fix กล่องไว้ก่อน */
+.cover-box{
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;            /* สัดส่วนปก DVD */
+  background: #e9ecf1;            /* ไลท์เกรย์ไว้แทนรูปตอนโหลด */
+  overflow: hidden;
+}
+.cover-box > img{
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;              /* คงอัตราส่วนเดิม ไม่บี้ */
+  transition: transform .3s ease; /* เผื่อทำ hover */
+}
+.card:hover .cover-box > img { transform: scale(1.03); } /* optional */
+
