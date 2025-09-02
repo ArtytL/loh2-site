@@ -1,32 +1,43 @@
-// src/App.jsx
 import React from "react";
+import { HashRouter, Routes, Route, Link, Navigate } from "react-router-dom";
+import Catalog from "./pages/Catalog.jsx";
+import Transfer from "./pages/Transfer.jsx";
+import { cart } from "./lib/cart.js";
 
-export default function App() {
-  const [view, setView] = React.useState(<div style={{padding:20}}>กำลังโหลด…</div>);
+export default function App(){
+  const [count, setCount] = React.useState(cart.count());
 
-  React.useEffect(() => {
-    import("./RealApp.jsx")
-      .then(m => setView(<m.default />))
-      .catch(err => {
-        setView(
-          <div style="padding:20;color:#b00020;white-space:pre-wrap">
-            <h2>โหลดแอปไม่สำเร็จ</h2>
-            {String(err && (err.message || err))}
+  React.useEffect(()=>{
+    const h = ()=> setCount(cart.count());
+    window.addEventListener("cart:change", h);
+    return ()=> window.removeEventListener("cart:change", h);
+  },[]);
 
-            <div style="margin-top:12px;color:#222">
-              ตรวจว่าไฟล์/พาธที่ import อยู่จริงและสะกดตรง:
-              <ul>
-                <li>src/lib/cart.js</li>
-                <li>src/utils/imageTools.js</li>
-                <li>หน้าเพจที่ import ทั้งหมด</li>
-              </ul>
-            </div>
-          </div>
-        );
-        // แสดง stack เพิ่มเติมในคอนโซล
-        console.error(err);
-      });
-  }, []);
+  return (
+    <>
+      <header className="site-header">
+        <div className="header-inner">
+          <Link className="brand" to="/">โล๊ะมือสอง</Link>
+          <nav className="nav">
+            <Link to="/">หน้าหลัก</Link>
+            <Link className="btn-pay" to="/transfer">ชำระเงิน</Link>
+            <Link className="cart-link" to="/transfer">
+              ตะกร้า
+              <span className="cart-badge">{count}</span>
+            </Link>
+          </nav>
+        </div>
+      </header>
 
-  return view;
+      <main>
+        <HashRouter>
+          <Routes>
+            <Route path="/" element={<Catalog />} />
+            <Route path="/transfer" element={<Transfer />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </HashRouter>
+      </main>
+    </>
+  );
 }
