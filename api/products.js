@@ -4,159 +4,78 @@ import { kvGet, kvSet } from "./_utils/kv.js";
 
 export const config = { runtime: "nodejs" };
 
-// ---------- helpers ----------
-function ok(res, data) {
-  return res.status(200).json({ ok: true, ...data });
-}
-function err(res, code = 400, msg = "Bad Request") {
-  return res.status(code).json({ ok: false, error: msg });
-}
-function readBody(req) {
-  try {
-    if (!req.body) return {};
-    if (typeof req.body === "string") return JSON.parse(req.body || "{}");
-    return req.body;
-  } catch {
-    return {};
-  }
-}
+// ---- verify admin (เหมือนที่คุณใช้อยู่) ----
 function verify(req) {
-  const h = req.headers.authorization || req.headers.Authorization;
-  if (!h) return null;
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  if (!m) return null;
   try {
+    const h = req.headers.authorization || "";
+    const m = h.match(/^Bearer (.+)$/i);
+    if (!m) return null;
     return jwt.verify(m[1], process.env.ADMIN_JWT_SECRET);
   } catch {
     return null;
   }
 }
 
-async function load() {
-  let raw = await kvGet("products");
-  if (!raw) return [];
-  // รองรับได้ทุกฟอร์แมตที่เคยเซฟไว้
-  if (typeof raw === "string") {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
+async function readItems() {
+  const raw = await kvGet("products");
+  let items = [];
+  const v = raw?.value ?? raw; // รองรับทั้ง object.value และ string
+  if (v) {
+    items = typeof v === "string" ? JSON.parse(v) : v;
   }
-  if (Array.isArray(raw)) return raw;
-  if (raw && typeof raw === "object" && "value" in raw) {
-    try {
-      return JSON.parse(raw.value);
-    } catch {
-      return [];
-    }
-  }
-  return [];
+  if (!Array.isArray(items)) items = [];
+  // de-dup ด้วย id (ตัวท้ายสุดเป็นของจริง)
+  const map = new Map();
+  for (const it of items) map.set(it.id, it);
+  return [...map.values()];
 }
 
-async function save(items) {
-  // บังคับเซฟเป็น string ให้สม่ำเสมอ
-  await kvSet("products", JSON.stringify(items));
+async function writeItems(items) {
+  await kvSet("products", items);
+}
+
+async function nextId() {
+  const raw = await kvGet("product:seq");
+  const seq = Number(raw?.value ?? raw ?? 0) + 1;
+  await kvSet("product:seq", seq);
+  return `P${String(seq).padStart(4, "0")}`;
 }
 
 export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
-      const items = await load();
-      return ok(res, { items });
+      const items = await readItems();
+      return res.json({ ok: true, items });
     }
 
-    // จากนี้ต้องเป็น admin เท่านั้น
     const admin = verify(req);
-    if (!admin) return err(res, 401, "Unauthorized");
+    if (!admin) return res.status(401).json({ ok: false, error: "Unauthorized" });
 
-    const url = new URL(req.url, `https://${req.headers.host}`);
-    const body = readBody(req);
-    const id =
-      body.id || url.searchParams.get("id") || url.searchParams.get("productId");
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    let items = await readItems();
 
-    let items = await load();
+    if (req.method === "POST" || req.method === "PUT") {
+      const it = body.product || body;
+      if (!it || !it.title) return res.status(400).json({ ok: false, error: "Missing product" });
 
-    if (req.method === "POST") {
-      // gen id
-      const seq = Number((await kvGet("product:seq")) || 0) + 1;
-      await kvSet("product:seq", seq);
-      const newId = "P" + String(seq).padStart(4, "0");
-
-      const images =
-        body.images !== undefined
-          ? Array.isArray(body.images)
-            ? body.images.filter(Boolean)
-            : body.images
-            ? [body.images]
-            : []
-          : [];
-
-      const product = {
-        id: newId,
-        title: (body.title || "").trim() || `สินค้า ${newId}`,
-        type: body.type || "DVD",
-        price: Number(body.price || 0),
-        qty: Number(body.qty || 0),
-        cover: body.cover || images[0] || "",
-        images,
-        youtube: body.youtube || "",
-        detail: body.detail || "",
-        createdAt: Date.now(),
-      };
-
-      items.push(product);
-      await save(items);
-      return ok(res, { item: product });
-    }
-
-    if (req.method === "PUT") {
-      if (!id) return err(res, 400, "Missing id");
-      const idx = items.findIndex((it) => it.id === id);
-      if (idx === -1) return err(res, 404, "Not found");
-
-      const p = items[idx];
-      const images =
-        body.images !== undefined
-          ? Array.isArray(body.images)
-            ? body.images.filter(Boolean)
-            : body.images
-            ? [body.images]
-            : []
-          : p.images;
-
-      const updated = {
-        ...p,
-        title:
-          body.title !== undefined
-            ? String(body.title).trim() || p.title
-            : p.title,
-        type: body.type ?? p.type,
-        price: body.price !== undefined ? Number(body.price) : p.price,
-        qty: body.qty !== undefined ? Number(body.qty) : p.qty,
-        cover: body.cover ?? p.cover,
-        images,
-        youtube: body.youtube ?? p.youtube,
-        detail: body.detail ?? p.detail,
-        updatedAt: Date.now(),
-      };
-
-      items[idx] = updated;
-      await save(items);
-      return ok(res, { item: updated });
+      if (!it.id) it.id = await nextId();            // เพิ่มใหม่
+      items = items.filter(x => x.id !== it.id);     // upsert: ล้างตัวเก่า
+      items.push(it);
+      await writeItems(items);
+      return res.json({ ok: true, product: it, items });
     }
 
     if (req.method === "DELETE") {
-      if (!id) return err(res, 400, "Missing id");
+      const id = body.id || req.query.id;
+      if (!id) return res.status(400).json({ ok: false, error: "Missing id" });
       const before = items.length;
-      items = items.filter((it) => it.id !== id);
-      if (items.length === before) return err(res, 404, "Not found");
-      await save(items);
-      return ok(res, { deleted: id });
+      items = items.filter(x => x.id !== id);
+      if (items.length !== before) await writeItems(items);
+      return res.json({ ok: true, deleted: items.length !== before, items });
     }
 
-    return err(res, 405, "Method Not Allowed");
+    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
   } catch (e) {
-    return err(res, 500, String(e?.message || e));
+    return res.status(500).json({ ok: false, error: String(e) });
   }
 }
