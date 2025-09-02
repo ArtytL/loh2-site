@@ -10,7 +10,7 @@
 html,body{height:100%}
 body{
   margin:0;
-  font-family:"Sarabun",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  font-family:"Sarabun", "Sukhumvit Set", -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif;
   color:var(--ink);
   background:#fff;
 }
