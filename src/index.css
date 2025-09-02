@@ -1,15 +1,38 @@
-/* ลบตัวคั่นจุด • ที่ถูกแทรกด้วย pseudo-element ในแถบเมนู */
-#top-nav,
-#top-nav ul { list-style: none; margin: 0; padding: 0; }
-
-/* บางธีมจะทำ a + a::before หรือ li + li::before ให้เป็น •  */
-#top-nav a + a::before,
-#top-nav li + li::before {
-  content: "" !important;
+/* --- Cover Image box --- */
+.cover-box{
+  width: 100%;
+  aspect-ratio: 2 / 3;          /* กล่องแนวตั้ง 2:3 แบบปก DVD */
+  background: #eef1f4;          /* สีพื้นตอนยังโหลด */
+  border-radius: 10px;
+  overflow: hidden;             /* กันภาพล้น */
+  display: block;
+  position: relative;
 }
 
-/* กันเคสที่ธีมยัด content เป็น • ใส่ทุก before/after ใน nav นี้ */
-#top-nav *::before,
-#top-nav *::after {
-  content: none !important;
+/* รูปด้านใน */
+.cover-box > img{
+  width: 100%;
+  height: 100%;
+  object-fit: contain;          /* <== คงอัตราส่วนเดิมของรูป (ไม่ตัด) */
+  display: block;
+  opacity: 0;                   /* ป้องกันกระพริบ */
+  transition: opacity .25s ease;
+}
+
+/* เมื่อโหลดเสร็จค่อยเฟดให้เห็น */
+.cover-box > img[data-loaded="true"]{
+  opacity: 1;
+}
+
+/* ใช้กับ grid การ์ด */
+.grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fill,minmax(220px,1fr));
+  gap: 16px;
+}
+
+.card{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
