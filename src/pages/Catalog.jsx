@@ -1,40 +1,47 @@
-// src/pages/Catalog.jsx
-import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import React from "react";
 import { toImageURL, NO_IMAGE } from "../utils/imageTools.js";
-import { addToCart } from "../lib/cart.js";
+import { cart } from "../lib/cart.js";
 
-export default function Catalog() {
-  const [items, setItems] = useState([]);
+export default function Catalog(){
+  const [items, setItems] = React.useState([]);
 
-  useEffect(() => {
+  React.useEffect(()=>{
     fetch("/api/products")
-      .then(r => r.json())
-      .then(d => setItems(d.items || []))
-      .catch(() => setItems([]));
-  }, []);
+      .then(r=>r.json())
+      .then(d=> setItems(d.items || []))
+      .catch(e=>{
+        console.error(e);
+        setItems([]);
+      });
+  },[]);
 
   return (
     <>
-      <h1 className="h1">รายการสินค้า</h1>
+      <h1 style={{margin:"10px 0 18px"}}>รายการสินค้า</h1>
       <div className="grid">
-        {items.map(p => (
+        {items.map(p=>(
           <div key={p.id} className="card">
-            <Link to={`/product/${p.id}`} className="cover-box">
+            <div className="cover-box">
               <img
-                src={toImageURL(p.cover) || NO_IMAGE}
-                alt={p.title}
-                onError={e => { e.currentTarget.src = NO_IMAGE; }}
+                src={toImageURL(p.cover)}
+                alt={p.title||p.id}
+                onError={e=> e.currentTarget.src = NO_IMAGE}
               />
-            </Link>
-            <div className="p-3">
-              <div className="p-3">
-                <div className="p-3">
-                  <strong>{p.title}</strong>
-                </div>
-                <div>{p.type}</div>
-                <div className="price-xl">{p.price} บาท</div>
-                <button className="btn-primary" onClick={() => addToCart(p, 1)}>
+            </div>
+            <div className="p-12">
+              <div style={{fontWeight:700}}>{p.title}</div>
+              <div className="meta">{p.type}</div>
+              <div className="price">{p.price} บาท</div>
+              <div style={{marginTop:10}}>
+                <button
+                  className="btn-primary"
+                  onClick={()=> cart.add({
+                    id: p.id,
+                    title: p.title,
+                    type: p.type,
+                    price: Number(p.price||0)
+                  }, 1)}
+                >
                   ใส่ตะกร้า
                 </button>
               </div>
