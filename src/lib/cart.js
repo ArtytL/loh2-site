@@ -12,7 +12,6 @@ export function readCart() {
 
 export function writeCart(items) {
   localStorage.setItem(KEY, JSON.stringify(items));
-  // แจ้งทุกหน้าว่าตะกร้าเปลี่ยน
   window.dispatchEvent(new Event("cart:changed"));
   window.dispatchEvent(new StorageEvent("storage", { key: KEY }));
 }
@@ -23,9 +22,8 @@ export function addToCart(p, qty = 1) {
   if (!id) return;
 
   const i = items.find(x => x.id === id);
-  if (i) {
-    i.qty = Math.max(1, Number(i.qty || 1) + Number(qty || 1));
-  } else {
+  if (i) i.qty = Math.max(1, Number(i.qty || 1) + Number(qty || 1));
+  else {
     items.push({
       id,
       code: p.id || p.code,
@@ -43,11 +41,8 @@ export function inc(id, delta = 1) {
   const i = items.find(x => x.id === id);
   if (!i) return;
   i.qty = Math.max(0, Number(i.qty || 0) + Number(delta));
-  if (i.qty <= 0) {
-    remove(id);
-  } else {
-    writeCart(items);
-  }
+  if (i.qty <= 0) remove(id);
+  else writeCart(items);
 }
 
 export function setQty(id, qty) {
@@ -75,7 +70,6 @@ export function totals() {
   return { items, itemsTotal, shipping, grand: itemsTotal + shipping };
 }
 
-// ใช้ใน header แสดงจำนวนรวม
 export function totalQty() {
   return readCart().reduce((s, x) => s + Number(x.qty || 0), 0);
 }
