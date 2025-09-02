@@ -1,104 +1,93 @@
-// src/pages/Transfer.jsx
-import React, { useEffect, useState } from "react";
-import { totals, inc, remove, clearCart, totalQty } from "../lib/cart.js";
+import React from "react";
+import { cart } from "../lib/cart.js";
 
-export default function Transfer() {
-  const [snap, setSnap] = useState(totals());
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [note, setNote] = useState("");
-  const [saving, setSaving] = useState(false);
+export default function Transfer(){
+  const [list, setList] = React.useState(cart.list());
+  const [name,setName] = React.useState("");
+  const [email,setEmail] = React.useState("");
+  const [phone,setPhone] = React.useState("");
+  const [addr,setAddr] = React.useState("");
+  const [note,setNote] = React.useState("");
 
-  useEffect(() => {
-    const onChange = () => setSnap(totals());
-    window.addEventListener("cart:changed", onChange);
-    window.addEventListener("storage", onChange);
-    onChange();
-    return () => {
-      window.removeEventListener("cart:changed", onChange);
-      window.removeEventListener("storage", onChange);
+  React.useEffect(()=>{
+    const h = ()=> setList(cart.list());
+    window.addEventListener("cart:change", h);
+    return ()=> window.removeEventListener("cart:change", h);
+  },[]);
+
+  const subTotal = list.reduce((s,it)=> s+it.price*it.qty, 0);
+  const shipping = list.length ? 50 : 0;
+  const grand = subTotal + shipping;
+
+  const plus = id => cart.setQty(id, (list.find(x=>x.id===id)?.qty||0)+1);
+  const minus = id => cart.setQty(id, (list.find(x=>x.id===id)?.qty||0)-1);
+
+  async function submit(){
+    if(!list.length){ alert("ยังไม่มีสินค้าในตะกร้า"); return; }
+    if(!name || !email || !phone || !addr){ alert("กรอกข้อมูลให้ครบ"); return; }
+
+    const payload = {
+      name,email,phone,address:addr,note,
+      cart:list.map(x=>({id:x.id,title:x.title,type:x.type,price:x.price,qty:x.qty}))
     };
-  }, []);
-
-  useEffect(() => {
-    const el = document.getElementById("cart-count-badge");
-    if (el) el.textContent = totalQty();
-  }, [snap]);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!snap.items.length) return alert("ยังไม่มีสินค้าในตะกร้า");
-    setSaving(true);
-    try {
-      const payload = {
-        name, email, phone, address, note,
-        cart: snap.items.map(x => ({ id: x.id, title: x.title, type: x.type, price: x.price, qty: x.qty })),
-        shipping: snap.shipping,
-        total: snap.grand,
-      };
-      const r = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+    try{
+      const r = await fetch("/api/orders",{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
       });
-      const data = await r.json();
-      if (!data.ok) throw new Error(data.error || "ส่งคำสั่งซื้อไม่สำเร็จ");
-      clearCart();
-      alert("ส่งคำสั่งซื้อเรียบร้อย! เลขออเดอร์: " + data.id);
-      window.location.hash = "#/";
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setSaving(false);
+      const d = await r.json();
+      if(d.ok){
+        cart.clear();
+        alert("ส่งคำสั่งซื้อเรียบร้อย ขอบคุณครับ!");
+      }else{
+        alert("ส่งคำสั่งซื้อไม่สำเร็จ: "+(d.error||""));
+      }
+    }catch(e){
+      console.error(e);
+      alert("ส่งคำสั่งซื้อไม่สำเร็จ");
     }
   }
 
   return (
-    <form onSubmit={submit}>
-      <h1 className="h1">แจ้งโอน</h1>
+    <>
+      <h1 style={{margin:"10px 0 18px"}}>แจ้งโอน</h1>
 
       <table className="table">
         <thead>
-          <tr>
-            <th>รหัส</th><th>ชื่อ</th><th>ประเภท</th>
-            <th style={{textAlign:"center"}}>จำนวน</th>
-            <th style={{textAlign:"right"}}>ราคา</th><th />
-          </tr>
+          <tr><th>รหัส</th><th>ชื่อ</th><th>ประเภท</th><th>จำนวน</th><th>ราคา</th><th></th></tr>
         </thead>
         <tbody>
-          {snap.items.map(it => (
+          {list.map(it=>(
             <tr key={it.id}>
               <td>{it.id}</td>
               <td>{it.title}</td>
               <td>{it.type}</td>
-              <td style={{textAlign:"center"}}>
-                <button type="button" onClick={() => inc(it.id, -1)}>-</button>
-                &nbsp;{it.qty}&nbsp;
-                <button type="button" onClick={() => inc(it.id, +1)}>+</button>
+              <td style={{whiteSpace:"nowrap"}}>
+                <button className="btn" onClick={()=> minus(it.id)}>-</button>
+                <span style={{padding:"0 10px"}}>{it.qty}</span>
+                <button className="btn" onClick={()=> plus(it.id)}>+</button>
               </td>
-              <td style={{textAlign:"right"}}>{Number(it.price) * Number(it.qty)}</td>
-              <td><button type="button" onClick={() => remove(it.id)}>ลบ</button></td>
+              <td>{it.price*it.qty}</td>
+              <td><button className="btn" onClick={()=> cart.remove(it.id)}>ลบ</button></td>
             </tr>
           ))}
-          <tr><td colSpan={4}>รวมสินค้า</td><td style={{textAlign:"right"}}>{snap.itemsTotal}</td><td /></tr>
-          <tr><td colSpan={4}>ค่าส่ง</td><td style={{textAlign:"right"}}>{snap.shipping}</td><td /></tr>
-          <tr><td colSpan={4}><strong>รวมสุทธิ</strong></td><td style={{textAlign:"right"}}><strong>{snap.grand}</strong></td><td /></tr>
         </tbody>
+        <tfoot>
+          <tr><td colSpan="4">รวมสินค้า</td><td>{subTotal}</td><td/></tr>
+          <tr><td colSpan="4">ค่าส่ง</td><td>{shipping}</td><td/></tr>
+          <tr><td colSpan="4">รวมสุทธิ</td><td>{grand}</td><td/></tr>
+        </tfoot>
       </table>
 
-      <div className="form">
-        <input placeholder="ชื่อ-นามสกุล" value={name} onChange={e=>setName(e.target.value)} />
-        <input placeholder="อีเมล" value={email} onChange={e=>setEmail(e.target.value)} />
-        <input placeholder="เบอร์โทร" value={phone} onChange={e=>setPhone(e.target.value)} />
-        <textarea placeholder="ที่อยู่จัดส่ง" value={address} onChange={e=>setAddress(e.target.value)} />
-        <input placeholder="หมายเหตุ (ถ้ามี)" value={note} onChange={e=>setNote(e.target.value)} />
+      <div style={{marginTop:20,display:"grid",gap:12}}>
+        <input className="input" placeholder="ชื่อ-นามสกุล" value={name} onChange={e=>setName(e.target.value)} />
+        <input className="input" placeholder="อีเมล" value={email} onChange={e=>setEmail(e.target.value)} />
+        <input className="input" placeholder="เบอร์โทร" value={phone} onChange={e=>setPhone(e.target.value)} />
+        <textarea className="input" placeholder="ที่อยู่จัดส่ง" rows={3} value={addr} onChange={e=>setAddr(e.target.value)} />
+        <input className="input" placeholder="หมายเหตุ (ถ้ามี)" value={note} onChange={e=>setNote(e.target.value)} />
+        <button className="btn-primary" onClick={submit}>ส่งคำสั่งซื้อ</button>
       </div>
-
-      <button className="btn-primary" disabled={saving} type="submit">
-        {saving ? "กำลังส่ง..." : "ส่งสั่งซื้อ"}
-      </button>
-    </form>
+    </>
   );
 }
