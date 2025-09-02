@@ -6,8 +6,21 @@ import Catalog from "./pages/Catalog.jsx";
 import Product from "./pages/Product.jsx";
 import Transfer from "./pages/Transfer.jsx";
 import Admin from "./pages/Admin.jsx";
+import { totalQty } from "./lib/cart.js";
 
 export default function App() {
+  React.useEffect(() => {
+    const el = document.getElementById("cart-count-badge");
+    if (el) el.textContent = totalQty();
+    const onChange = () => { if (el) el.textContent = totalQty(); };
+    window.addEventListener("cart:changed", onChange);
+    window.addEventListener("storage", onChange);
+    return () => {
+      window.removeEventListener("cart:changed", onChange);
+      window.removeEventListener("storage", onChange);
+    };
+  }, []);
+
   return (
     <HashRouter>
       <header className="site-header">
