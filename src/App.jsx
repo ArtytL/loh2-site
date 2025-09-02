@@ -1,31 +1,39 @@
 // src/App.jsx
-import { Routes, Route, Link, Navigate } from "react-router-dom";
-import Home from "./pages/Home.jsx";
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+import Header from "./components/Header";
+import { CartProvider } from "./context/CartContext";
+
+// เพจเดิมของคุณ
 import Catalog from "./pages/Catalog.jsx";
-import Checkout from "./pages/Checkout.jsx";
-import Transfer from "./pages/Transfer.jsx";
-import Admin from "./pages/Admin.jsx";
-// ⬇️ เพิ่ม
 import Product from "./pages/Product.jsx";
+import Checkout from "./pages/Checkout.jsx";
+import Admin from "./pages/Admin.jsx";
 
 export default function App() {
   return (
-    <main>
-      {/* nav ... */}
+    <CartProvider>
+      <Header />
 
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/catalog" element={<Catalog />} />
-        {/* ⬇️ เส้นทางใหม่ */}
-        <Route path="/product/:id" element={<Product />} />
+      <main className="container">
+        <Routes>
+          {/* หน้าแรก = แค็ตตาล็อกสินค้า */}
+          <Route path="/" element={<Catalog />} />
+          <Route path="/catalog" element={<Catalog />} />
 
-        <Route path="/checkout" element={<Checkout />} />
-        <Route path="/transfer" element={<Transfer />} />
-        <Route path="/admin" element={<Admin />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* รายละเอียดสินค้า */}
+          <Route path="/product/:id" element={<Product />} />
 
-      {/* footer ... */}
-    </main>
+          {/* ชำระเงิน */}
+          <Route path="/checkout" element={<Checkout />} />
+
+          {/* หลังบ้าน (มีอยู่แล้ว) */}
+          <Route path="/admin" element={<Admin />} />
+
+          {/* กันหลงทาง */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </CartProvider>
   );
 }
