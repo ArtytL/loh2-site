@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toImageURL, NO_IMAGE } from "../utils/imageTools.js";
-import * as cart from "../lib/cart.js";
+import { addToCart } from "../lib/cart.js";
 
 export default function Product() {
   const { id } = useParams();
@@ -11,8 +11,11 @@ export default function Product() {
   useEffect(() => {
     fetch("/api/products")
       .then((r) => r.json())
-      .then((d) => (d.items || []).find((x) => String(x.id) === String(id)))
-      .then(setP)
+      .then((d) => {
+        const item =
+          (d.items || []).find((x) => String(x.id) === String(id)) || null;
+        setP(item);
+      })
       .catch(() => setP(null));
   }, [id]);
 
@@ -38,7 +41,7 @@ export default function Product() {
 
           <button
             className="btn-primary"
-            onClick={() => cart.addToCart(p, 1)}
+            onClick={() => addToCart(p, 1)}
             style={{ marginTop: 8 }}
           >
             ใส่ตะกร้า
