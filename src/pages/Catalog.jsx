@@ -2,11 +2,11 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toImageURL, NO_IMAGE } from "../utils/imageTools.js";
-// นำเข้าเป็นเนมสเปซ เพื่อเรียก cart.addToCart(...) ได้
 import * as cart from "../lib/cart.js";
 
 export default function Catalog() {
   const [items, setItems] = useState([]);
+  const [count, setCount] = useState(cart.getCount()); // จำนวนในตะกร้าปัจจุบัน
 
   useEffect(() => {
     fetch("/api/products")
@@ -15,42 +15,46 @@ export default function Catalog() {
       .catch(() => setItems([]));
   }, []);
 
+  function handleAdd(p) {
+    cart.addToCart(p, 1);          // เพิ่มสินค้า
+    setCount(cart.getCount());     // อัปเดต badge จำนวน
+  }
+
   return (
-    <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      {items.map((p) => (
-        <div key={p.id} className="card">
-          {/* ลิงก์ไปหน้ารายละเอียดสินค้า */}
-          <Link to={`/product/${p.id}`}>
-            <img
-              src={toImageURL(p.cover)}
-              alt={p.title}
-              onError={(e) => {
-                e.currentTarget.src = NO_IMAGE;
-              }}
-              style={{
-                width: "100%",
-                height: 220,
-                objectFit: "cover",
-                borderRadius: 12,
-              }}
-            />
-          </Link>
+    <div className="container-max">
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="h1">รายการสินค้า</h1>
+        <Link to="/checkout" className="btn-pay">
+          ตะกร้า <span className="ml-1">({count})</span>
+        </Link>
+      </div>
 
-          <div className="p-3">
-            <h2 className="h1">{p.title}</h2>
-            <div className="meta-line">{p.type}</div>
-            <div className="price-xl">{p.price} บาท</div>
+      <div className="grid grid-cols-2 gap-6">
+        {items.map((p) => (
+          <div key={p.id} className="card">
+            <Link to={`/product/${p.id}`} className="cover-box">
+              <img
+                src={toImageURL(p.cover) || NO_IMAGE}
+                alt={p.title}
+                onError={(e) => { e.currentTarget.src = NO_IMAGE; }}
+              />
+            </Link>
 
-            {/* ปุ่มใส่ตะกร้า */}
-            <button
-              className="btn-primary mt-2"
-              onClick={() => cart.addToCart(p, 1)}
-            >
-              ใส่ตะกร้า
-            </button>
+            <div className="p-3">
+              <h2 className="h1 text-base">{p.title}</h2>
+              <div className="meta-line">{p.type}</div>
+              <div className="price-xl">{p.price} บาท</div>
+
+              <button
+                className="btn-primary mt-2"
+                onClick={() => handleAdd(p)}
+              >
+                ใส่ตะกร้า
+              </button>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
