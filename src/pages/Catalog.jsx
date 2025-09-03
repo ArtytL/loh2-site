@@ -1,54 +1,56 @@
-import React from "react";
+// src/pages/Catalog.jsx
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toImageURL, NO_IMAGE } from "../utils/imageTools.js";
-import { cart } from "../lib/cart.js";
+// นำเข้าเป็นเนมสเปซ เพื่อเรียก cart.addToCart(...) ได้
+import * as cart from "../lib/cart.js";
 
-export default function Catalog(){
-  const [items, setItems] = React.useState([]);
+export default function Catalog() {
+  const [items, setItems] = useState([]);
 
-  React.useEffect(()=>{
+  useEffect(() => {
     fetch("/api/products")
-      .then(r=>r.json())
-      .then(d=> setItems(d.items || []))
-      .catch(e=>{
-        console.error(e);
-        setItems([]);
-      });
-  },[]);
+      .then((r) => r.json())
+      .then((d) => setItems(d.items || []))
+      .catch(() => setItems([]));
+  }, []);
 
   return (
-    <>
-      <h1 style={{margin:"10px 0 18px"}}>รายการสินค้า</h1>
-      <div className="grid">
-        {items.map(p=>(
-          <div key={p.id} className="card">
-            <div className="cover-box">
-              <img
-                src={toImageURL(p.cover)}
-                alt={p.title||p.id}
-                onError={e=> e.currentTarget.src = NO_IMAGE}
-              />
-            </div>
-            <div className="p-12">
-              <div style={{fontWeight:700}}>{p.title}</div>
-              <div className="meta">{p.type}</div>
-              <div className="price">{p.price} บาท</div>
-              <div style={{marginTop:10}}>
-                <button
-                  className="btn-primary"
-                  onClick={()=> cart.add({
-                    id: p.id,
-                    title: p.title,
-                    type: p.type,
-                    price: Number(p.price||0)
-                  }, 1)}
-                >
-                  ใส่ตะกร้า
-                </button>
-              </div>
-            </div>
+    <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((p) => (
+        <div key={p.id} className="card">
+          {/* ลิงก์ไปหน้ารายละเอียดสินค้า */}
+          <Link to={`/product/${p.id}`}>
+            <img
+              src={toImageURL(p.cover)}
+              alt={p.title}
+              onError={(e) => {
+                e.currentTarget.src = NO_IMAGE;
+              }}
+              style={{
+                width: "100%",
+                height: 220,
+                objectFit: "cover",
+                borderRadius: 12,
+              }}
+            />
+          </Link>
+
+          <div className="p-3">
+            <h2 className="h1">{p.title}</h2>
+            <div className="meta-line">{p.type}</div>
+            <div className="price-xl">{p.price} บาท</div>
+
+            {/* ปุ่มใส่ตะกร้า */}
+            <button
+              className="btn-primary mt-2"
+              onClick={() => cart.addToCart(p, 1)}
+            >
+              ใส่ตะกร้า
+            </button>
           </div>
-        ))}
-      </div>
-    </>
+        </div>
+      ))}
+    </div>
   );
 }
