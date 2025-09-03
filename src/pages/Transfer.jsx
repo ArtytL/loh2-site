@@ -1,93 +1,58 @@
-import React from "react";
-import { cart } from "../lib/cart.js";
+// ด้านบนไฟล์
+import { useState } from "react";
 
-export default function Transfer(){
-  const [list, setList] = React.useState(cart.list());
-  const [name,setName] = React.useState("");
-  const [email,setEmail] = React.useState("");
-  const [phone,setPhone] = React.useState("");
-  const [addr,setAddr] = React.useState("");
-  const [note,setNote] = React.useState("");
+// ภายใน component หน้าแจ้งโอน/ชำระเงิน
+const [form, setForm] = useState({
+  name: "", email: "", phone: "", address: "", note: ""
+});
+const [busy, setBusy] = useState(false);
+const [msg, setMsg] = useState("");
 
-  React.useEffect(()=>{
-    const h = ()=> setList(cart.list());
-    window.addEventListener("cart:change", h);
-    return ()=> window.removeEventListener("cart:change", h);
-  },[]);
+async function handleSubmit(e) {
+  e?.preventDefault?.();
+  setBusy(true); setMsg("");
 
-  const subTotal = list.reduce((s,it)=> s+it.price*it.qty, 0);
-  const shipping = list.length ? 50 : 0;
-  const grand = subTotal + shipping;
+  try {
+    // 1) ดึงตะกร้าจาก localStorage (หรือถ้าใช้ context/store ของคุณ ให้ดึงจากตรงนั้นแทน)
+    let cart = JSON.parse(localStorage.getItem("cart") || "[]");
+    cart = cart.map(p => ({
+      id: p.id,
+      title: p.title,
+      type: p.type || p.category || "",
+      qty: Number(p.qty || 1),
+      price: Number(p.price || 0),
+    }));
 
-  const plus = id => cart.setQty(id, (list.find(x=>x.id===id)?.qty||0)+1);
-  const minus = id => cart.setQty(id, (list.find(x=>x.id===id)?.qty||0)-1);
+    if (!cart.length) throw new Error("ตะกร้าว่าง");
 
-  async function submit(){
-    if(!list.length){ alert("ยังไม่มีสินค้าในตะกร้า"); return; }
-    if(!name || !email || !phone || !addr){ alert("กรอกข้อมูลให้ครบ"); return; }
+    // 2) คำนวณยอด
+    const shipping = 50;
+    const subtotal = cart.reduce((s, p) => s + p.price * p.qty, 0);
+    const total = subtotal + shipping;
 
-    const payload = {
-      name,email,phone,address:addr,note,
-      cart:list.map(x=>({id:x.id,title:x.title,type:x.type,price:x.price,qty:x.qty}))
-    };
-    try{
-      const r = await fetch("/api/orders",{
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify(payload)
-      });
-      const d = await r.json();
-      if(d.ok){
-        cart.clear();
-        alert("ส่งคำสั่งซื้อเรียบร้อย ขอบคุณครับ!");
-      }else{
-        alert("ส่งคำสั่งซื้อไม่สำเร็จ: "+(d.error||""));
-      }
-    }catch(e){
-      console.error(e);
-      alert("ส่งคำสั่งซื้อไม่สำเร็จ");
+    // 3) ยิงไป API ของเรา (same-origin)
+    const res = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...form, cart, shipping, total }),
+    });
+
+    // 4) เช็คผลแบบชัวร์ (ต้องเป็น JSON และมี ok:true)
+    let data;
+    try { data = await res.json(); } 
+    catch { throw new Error("คำตอบจากเซิร์ฟเวอร์ไม่ใช่ JSON (อาจโดน Security Checkpoint)"); }
+
+    if (!res.ok || !data?.ok) {
+      throw new Error(data?.error || "ส่งคำสั่งซื้อไม่สำเร็จ");
     }
+
+    setMsg("✅ ส่งคำสั่งซื้อเรียบร้อย! เช็กอีเมลได้เลย");
+    // ถ้าจะเคลียร์ตะกร้า:
+    // localStorage.removeItem("cart");
+  } catch (err) {
+    console.error(err);
+    setMsg("❌ " + err.message);
+  } finally {
+    setBusy(false);
   }
-
-  return (
-    <>
-      <h1 style={{margin:"10px 0 18px"}}>แจ้งโอน</h1>
-
-      <table className="table">
-        <thead>
-          <tr><th>รหัส</th><th>ชื่อ</th><th>ประเภท</th><th>จำนวน</th><th>ราคา</th><th></th></tr>
-        </thead>
-        <tbody>
-          {list.map(it=>(
-            <tr key={it.id}>
-              <td>{it.id}</td>
-              <td>{it.title}</td>
-              <td>{it.type}</td>
-              <td style={{whiteSpace:"nowrap"}}>
-                <button className="btn" onClick={()=> minus(it.id)}>-</button>
-                <span style={{padding:"0 10px"}}>{it.qty}</span>
-                <button className="btn" onClick={()=> plus(it.id)}>+</button>
-              </td>
-              <td>{it.price*it.qty}</td>
-              <td><button className="btn" onClick={()=> cart.remove(it.id)}>ลบ</button></td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr><td colSpan="4">รวมสินค้า</td><td>{subTotal}</td><td/></tr>
-          <tr><td colSpan="4">ค่าส่ง</td><td>{shipping}</td><td/></tr>
-          <tr><td colSpan="4">รวมสุทธิ</td><td>{grand}</td><td/></tr>
-        </tfoot>
-      </table>
-
-      <div style={{marginTop:20,display:"grid",gap:12}}>
-        <input className="input" placeholder="ชื่อ-นามสกุล" value={name} onChange={e=>setName(e.target.value)} />
-        <input className="input" placeholder="อีเมล" value={email} onChange={e=>setEmail(e.target.value)} />
-        <input className="input" placeholder="เบอร์โทร" value={phone} onChange={e=>setPhone(e.target.value)} />
-        <textarea className="input" placeholder="ที่อยู่จัดส่ง" rows={3} value={addr} onChange={e=>setAddr(e.target.value)} />
-        <input className="input" placeholder="หมายเหตุ (ถ้ามี)" value={note} onChange={e=>setNote(e.target.value)} />
-        <button className="btn-primary" onClick={submit}>ส่งคำสั่งซื้อ</button>
-      </div>
-    </>
-  );
 }
