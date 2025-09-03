@@ -1,84 +1,90 @@
 // src/lib/cart.js
 
-const KEY = "cart";
+const CART_KEY = "cart";
 
-function read() {
+/* ---------- utils ---------- */
+function loadCart() {
   try {
-    return JSON.parse(localStorage.getItem(KEY) || "[]");
+    const raw = localStorage.getItem(CART_KEY);
+    return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function write(items) {
-  localStorage.setItem(KEY, JSON.stringify(items));
-  // กระจาย event เผื่อส่วน header ต้องอัปเดต badge ตะกร้า
-  window.dispatchEvent(new CustomEvent("cart:change"));
+function saveCart(items) {
+  localStorage.setItem(CART_KEY, JSON.stringify(items));
 }
 
-// === Named Exports ===
-export function getCart() {
-  return read();
+function pickProduct(p) {
+  // เก็บเฉพาะฟิลด์ที่ต้องใช้ในตะกร้า (กัน payload บวม)
+  return {
+    id: String(p.id),
+    title: p.title,
+    type: p.type,
+    price: Number(p.price || 0),
+    cover: p.cover || null,
+  };
 }
 
-export function setCart(items) {
-  write(items);
-}
+/* ---------- APIs ที่หน้าเว็บใช้เรียก ---------- */
 
-export function getCartCount() {
-  return read().reduce((sum, i) => sum + (i.qty || 1), 0);
-}
-
+/** เพิ่มสินค้าเข้าตะกร้า */
 export function addToCart(product, qty = 1) {
-  const items = read();
-  const idx = items.findIndex((x) => String(x.id) === String(product.id));
-  if (idx >= 0) {
-    items[idx].qty = (items[idx].qty || 1) + qty;
+  const items = loadCart();
+  const id = String(product.id);
+  const i = items.findIndex((it) => String(it.id) === id);
+
+  if (i >= 0) {
+    items[i].qty = Number(items[i].qty || 0) + Number(qty || 1);
   } else {
-    items.push({
-      id: product.id,
-      title: product.title,
-      type: product.type,
-      price: product.price,
-      cover: product.cover,
-      qty,
-    });
+    items.push({ ...pickProduct(product), qty: Number(qty || 1) });
   }
-  write(items);
+
+  saveCart(items);
+  return items;
 }
 
-export function updateQty(id, qty) {
-  const items = read();
-  const item = items.find((x) => String(x.id) === String(id));
-  if (item) {
-    item.qty = Math.max(1, qty | 0);
-    write(items);
-  }
+/** ดึงรายการในตะกร้า */
+export function getCart() {
+  return loadCart();
 }
 
+/** จำนวนชิ้นรวมในตะกร้า */
+export function getCount() {
+  return loadCart().reduce((n, it) => n + Number(it.qty || 0), 0);
+}
+
+/** ยอดรวมราคา (ไม่รวมค่าส่ง) */
+export function getTotal() {
+  return loadCart().reduce((sum, it) => sum + Number(it.price || 0) * Number(it.qty || 0), 0);
+}
+
+/** แก้จำนวนชิ้นของสินค้า */
+export function setQty(id, qty) {
+  const items = loadCart();
+  const i = items.findIndex((it) => String(it.id) === String(id));
+  if (i >= 0) {
+    const q = Number(qty || 0);
+    if (q <= 0) {
+      items.splice(i, 1);
+    } else {
+      items[i].qty = q;
+    }
+    saveCart(items);
+  }
+  return items;
+}
+
+/** ลบสินค้าออกจากตะกร้า */
 export function removeFromCart(id) {
-  const items = read().filter((x) => String(x.id) !== String(id));
-  write(items);
+  const items = loadCart().filter((it) => String(it.id) !== String(id));
+  saveCart(items);
+  return items;
 }
 
+/** เคลียร์ตะกร้าทั้งหมด */
 export function clearCart() {
-  write([]);
+  localStorage.removeItem(CART_KEY);
+  return [];
 }
-
-export function totals(shipping = 50) {
-  const items = read();
-  const subtotal = items.reduce((s, i) => s + i.price * (i.qty || 1), 0);
-  return { items, shipping, total: subtotal + shipping };
-}
-
-// เผื่อใครอยาก import default ก็ได้
-export default {
-  getCart,
-  setCart,
-  getCartCount,
-  addToCart,
-  updateQty,
-  removeFromCart,
-  clearCart,
-  totals,
-};
