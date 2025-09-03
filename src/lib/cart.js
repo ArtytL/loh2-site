@@ -1,46 +1,39 @@
 // src/lib/cart.js
 
-// คีย์สำหรับเก็บใน localStorage
-export const CART_KEY = "cart_v1";
+const KEY = "cart";
 
-// อ่านตะกร้า
-export function getCart() {
+function read() {
   try {
-    const raw = localStorage.getItem(CART_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return JSON.parse(localStorage.getItem(KEY) || "[]");
   } catch {
     return [];
   }
 }
 
-// เขียนตะกร้า + broadcast event ให้ badge/ตัวเลขบนหัวอัพเดต
+function write(items) {
+  localStorage.setItem(KEY, JSON.stringify(items));
+  // กระจาย event เผื่อส่วน header ต้องอัปเดต badge ตะกร้า
+  window.dispatchEvent(new CustomEvent("cart:change"));
+}
+
+// === Named Exports ===
+export function getCart() {
+  return read();
+}
+
 export function setCart(items) {
-  localStorage.setItem(CART_KEY, JSON.stringify(items));
-  const detail = {
-    items,
-    count: cartCount(items),
-    total: cartTotal(items),
-  };
-  window.dispatchEvent(new CustomEvent("cart:change", { detail }));
-  return items;
+  write(items);
 }
 
-// จำนวนชิ้นรวม
-export function cartCount(items = getCart()) {
-  return items.reduce((s, i) => s + (i.qty || 0), 0);
+export function getCartCount() {
+  return read().reduce((sum, i) => sum + (i.qty || 1), 0);
 }
 
-// ราคารวม
-export function cartTotal(items = getCart()) {
-  return items.reduce((s, i) => s + (i.price || 0) * (i.qty || 0), 0);
-}
-
-// เพิ่มสินค้าลงตะกร้า
 export function addToCart(product, qty = 1) {
-  const items = getCart();
-  const idx = items.findIndex((i) => String(i.id) === String(product.id));
-  if (idx > -1) {
-    items[idx].qty += qty;
+  const items = read();
+  const idx = items.findIndex((x) => String(x.id) === String(product.id));
+  if (idx >= 0) {
+    items[idx].qty = (items[idx].qty || 1) + qty;
   } else {
     items.push({
       id: product.id,
@@ -51,27 +44,41 @@ export function addToCart(product, qty = 1) {
       qty,
     });
   }
-  return setCart(items);
+  write(items);
 }
 
-// ลบ 1 ชิ้น
-export function decFromCart(productId, step = 1) {
-  const items = getCart();
-  const idx = items.findIndex((i) => String(i.id) === String(productId));
-  if (idx > -1) {
-    items[idx].qty -= step;
-    if (items[idx].qty <= 0) items.splice(idx, 1);
+export function updateQty(id, qty) {
+  const items = read();
+  const item = items.find((x) => String(x.id) === String(id));
+  if (item) {
+    item.qty = Math.max(1, qty | 0);
+    write(items);
   }
-  return setCart(items);
 }
 
-// เอาออกทั้งรายการ
-export function removeFromCart(productId) {
-  const items = getCart().filter((i) => String(i.id) !== String(productId));
-  return setCart(items);
+export function removeFromCart(id) {
+  const items = read().filter((x) => String(x.id) !== String(id));
+  write(items);
 }
 
-// เคลียร์ตะกร้า
 export function clearCart() {
-  return setCart([]);
+  write([]);
 }
+
+export function totals(shipping = 50) {
+  const items = read();
+  const subtotal = items.reduce((s, i) => s + i.price * (i.qty || 1), 0);
+  return { items, shipping, total: subtotal + shipping };
+}
+
+// เผื่อใครอยาก import default ก็ได้
+export default {
+  getCart,
+  setCart,
+  getCartCount,
+  addToCart,
+  updateQty,
+  removeFromCart,
+  clearCart,
+  totals,
+};
