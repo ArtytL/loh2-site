@@ -2,125 +2,297 @@
 
 export const config = { runtime: "nodejs" };
 
-// ---------- Utils ----------
-const json = (res, status, data) => {
-  res.status(status).setHeader("Content-Type", "application/json").end(JSON.stringify(data));
-};
-
-const allowCors = (req, res) => {
-  // ถ้าจะล็อก domain ให้แทน "*" เป็นโดเมนโปรดักชันของคุณ
+function setCORS(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-};
-
-// ---------- Email helper (Resend) ----------
-async function sendResendEmail({ subject, to, html, from }) {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error("Missing RESEND_API_KEY");
-
-  const resp = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: from || process.env.MAIL_FROM || "onboarding@resend.dev",
-      to: Array.isArray(to) ? to : [to],
-      subject,
-      html,
-    }),
-  });
-
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data?.message || "Resend send failed");
-  return data;
 }
 
-function formatMoney(n) {
-  return Number(n || 0).toLocaleString("th-TH");
-}
-
-function buildEmailHTML(order) {
-  const { name, email, phone, address, note, cart = [], shipping = 0, total = 0 } = order;
-  const rows = cart
-    .map(
-      (p) => `
-      <tr>
-        <td>${p.id || ""}</td>
-        <td>${p.title || "-"}</td>
-        <td style="text-align:center">${p.qty || 1}</td>
-        <td style="text-align:right">${formatMoney(p.price || 0)}</td>
-      </tr>`
-    )
-    .join("");
-
-  return `
-  <div style="font-family:system-ui,Segoe UI,TH Sarabun New,Arial,sans-serif;line-height:1.6">
-    <h2 style="margin:0 0 12px">${process.env.SITE_NAME || "Order"}</h2>
-    <p><b>ชื่อลูกค้า:</b> ${name || "-"}<br/>
-       <b>อีเมล:</b> ${email || "-"}<br/>
-       <b>โทร:</b> ${phone || "-"}<br/>
-       <b>ที่อยู่จัดส่ง:</b> ${address || "-"}</p>
-
-    <table width="100%" cellspacing="0" cellpadding="8" style="border-collapse:collapse">
-      <thead>
-        <tr style="background:#f5f5f5">
-          <th align="left">รหัส</th><th align="left">ชื่อ</th>
-          <th align="center">จำนวน</th><th align="right">ราคา</th>
-        </tr>
-      </thead>
-      <tbody>${rows || `<tr><td colspan="4" align="center">- ไม่มีสินค้า -</td></tr>`}</tbody>
-      <tfoot>
-        <tr><td colspan="3" align="right"><b>ค่าส่ง</b></td><td align="right">${formatMoney(shipping)}</td></tr>
-        <tr><td colspan="3" align="right"><b>รวมสุทธิ</b></td><td align="right"><b>${formatMoney(total)}</b></td></tr>
-      </tfoot>
-    </table>
-
-    ${note ? `<p><b>หมายเหตุ:</b> ${note}</p>` : ""}
-    <p style="color:#888;font-size:12px">อีเมลนี้เป็นการยืนยันรับคำสั่งซื้ออัตโนมัติ</p>
-  </div>`;
-}
-
-// ---------- Handler ----------
 export default async function handler(req, res) {
-  allowCors(req, res);
+  setCORS(res);
 
-  // preflight
-  if (req.method === "OPTIONS") return res.status(204).end();
-
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
   if (req.method !== "POST") {
-    return json(res, 405, { ok: false, error: "Method Not Allowed" });
+    res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    return;
   }
 
   try {
-    const order = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const bodyText =
+      typeof req.body === "string" ? req.body : await readBodyText(req);
 
-    // validate ข้อมูลขั้นต่ำ
-    const required = ["name", "email", "phone", "address", "cart", "total"];
-    for (const f of required) {
-      if (order[f] === undefined || order[f] === null || order[f] === "") {
-        return json(res, 400, { ok: false, error: `missing: ${f}` });
-      }
+    const data = JSON.parse(bodyText || "{}");
+    const { name, email, phone, address, note, cart, shipping, total } = data;
+
+    if (!email || !Array.isArray(cart)) {
+      res.status(400).json({ ok: false, error: "Invalid payload" });
+      return;
     }
 
-    // สร้าง HTML อีเมลครั้งเดียว ใช้ร่วมกันทั้ง "ถึงร้าน" และ "ถึงลูกค้า"
-    const html = buildEmailHTML(order);
-    const shopTo = process.env.MAIL_TO || process.env.MAIL_FROM || "onboarding@resend.dev";
-    const from = process.env.MAIL_FROM || "onboarding@resend.dev";
-    const shopSubject = `🧾 ออเดอร์ใหม่จาก ${process.env.SITE_NAME || "ร้าน"} — รวม ${formatMoney(order.total)} บาท`;
-    const userSubject = `ยืนยันคำสั่งซื้อ — ${process.env.SITE_NAME || "ร้าน"} (รวม ${formatMoney(order.total)} บาท)`;
+    const { Resend } = await import("resend");
+    const resend = new Resend(process.env.RESEND_API_KEY);
 
-    // ส่งอีเมล 2 ฝั่งพร้อมกัน
-    await Promise.all([
-      sendResendEmail({ subject: shopSubject, to: shopTo, html, from }),
-      sendResendEmail({ subject: userSubject, to: order.email, html, from }),
-    ]);
+    const to = process.env.ORDER_EMAIL_TO || email;
+    const from = process.env.ORDER_EMAIL_FROM || "onboarding@resend.dev";
 
-    return json(res, 200, { ok: true });
+    const itemsHtml = cart
+      .map(
+        (i) =>
+          `<tr>
+            <td style="padding:6px 8px;border:1px solid #eee;">${i.id}</td>
+            <td style="padding:6px 8px;border:1px solid #eee;">${i.title}</td>
+            <td style="padding:6px 8px;border:1px solid #eee; text-align:right;">${i.qty}</td>
+            <td style="padding:6px 8px;border:1px solid #eee; text-align:right;">${i.price}</td>
+          </tr>`
+      )
+      .join("");
+
+    const html = `
+      <h2>คำสั่งซื้อใหม่</h2>
+      <p><b>ชื่อ</b>: ${name || "-"}<br/>
+         <b>อีเมล</b>: ${email}<br/>
+         <b>โทร</b>: ${phone || "-"}<br/>
+         <b>ที่อยู่</b>: ${address || "-"}</p>
+
+      <table style="border-collapse:collapse;border:1px solid #eee;">
+        <thead>
+          <tr>
+            <th style="padding:6px 8px;border:1px solid #eee;">รหัส</th>
+            <th style="padding:6px 8px;border:1px solid #eee;">ชื่อ</th>
+            <th style="padding:6px 8px;border:1px solid #eee;">จำนวน</th>
+            <th style="padding:6px 8px;border:1px solid #eee;">ราคา</th>
+          </tr>
+        </thead>
+        <tbody>${itemsHtml}</tbody>
+      </table>
+
+      <p><b>ค่าส่ง</b>: ${shipping ?? 0} บาท<br/>
+         <b>รวมสุทธิ</b>: ${total ?? 0} บาท</p>
+
+      <p><b>หมายเหตุ</b>: ${note || "-"}</p>
+    `;
+
+    await resend.emails.send({
+      from,
+      to,
+      subject: `Order from ${name || email}`,
+      html,
+    });
+
+    res.status(200).json({ ok: true });
   } catch (err) {
-    console.error("ORDER ERROR:", err);
-    return json(res, 500, { ok: false, error: String(err.message || err) });
+    res.status(200).json({ ok: false, error: String(err?.message || err) });
   }
 }
+
+function readBodyText(req) {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => resolve(data));
+  });
+}
+3) ทำหน้า “แจ้งโอน” ให้กรอกและส่งได้จริง
+แทนที่ไฟล์ src/pages/Transfer.jsx ทั้งไฟล์:
+
+jsx
+Copy code
+// src/pages/Transfer.jsx
+import React, { useEffect, useMemo, useState } from "react";
+
+function getCart() {
+  try {
+    return JSON.parse(localStorage.getItem("cart") || "[]");
+  } catch {
+    return [];
+  }
+}
+function setCart(items) {
+  localStorage.setItem("cart", JSON.stringify(items || []));
+  window.dispatchEvent(new CustomEvent("cart:changed"));
+}
+
+export default function Transfer() {
+  const [items, setItems] = useState([]);
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    address: "",
+    note: "",
+  });
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setItems(getCart());
+  }, []);
+
+  const shipping = 50;
+  const subtotal = useMemo(
+    () => items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0),
+    [items]
+  );
+  const total = subtotal + shipping;
+
+  const onChange = (e) =>
+    setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setSending(true);
+    setError("");
+
+    try {
+      const payload = {
+        ...form,
+        cart: items.map((i) => ({
+          id: i.id,
+          title: i.title,
+          type: i.type,
+          qty: i.qty,
+          price: i.price,
+        })),
+        shipping,
+        total,
+      };
+
+      const r = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((r) => r.json());
+
+      if (!r.ok) throw new Error(r.error || "ส่งคำสั่งซื้อไม่สำเร็จ");
+      setDone(true);
+      setCart([]); // เคลียร์ตะกร้า
+    } catch (err) {
+      setError(String(err.message || err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <main className="container-max mx-auto px-4 py-8">
+        <h1 className="h1 mb-6">ส่งคำสั่งซื้อแล้ว</h1>
+        <p>ขอบคุณครับ เราได้รับคำสั่งซื้อเรียบร้อยแล้ว กรุณาตรวจสอบอีเมลของคุณ</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="container-max mx-auto px-4 py-8">
+      <h1 className="h1 mb-6">แจ้งโอน</h1>
+
+      <div className="grid lg:grid-cols-2 gap-8">
+        {/* สรุปรายการ */}
+        <section>
+          <h2 className="text-xl font-bold mb-3">สรุปรายการ</h2>
+          {items.length === 0 ? (
+            <p>ตะกร้าของคุณยังว่างอยู่</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2">สินค้า</th>
+                  <th className="text-right py-2">จำนวน</th>
+                  <th className="text-right py-2">ราคา</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it) => (
+                  <tr key={it.id} className="border-b">
+                    <td className="py-2">{it.title}</td>
+                    <td className="text-right py-2">{it.qty}</td>
+                    <td className="text-right py-2">
+                      {Number(it.price * it.qty).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td className="py-2">ค่าส่ง</td>
+                  <td />
+                  <td className="text-right py-2">{shipping.toLocaleString()}</td>
+                </tr>
+                <tr className="font-semibold">
+                  <td className="py-2">รวมสุทธิ</td>
+                  <td />
+                  <td className="text-right py-2">{total.toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </section>
+
+        {/* ฟอร์มข้อมูลผู้รับ */}
+        <section>
+          <h2 className="text-xl font-bold mb-3">ข้อมูลผู้รับ</h2>
+
+          <form onSubmit={onSubmit} className="space-y-3">
+            <input
+              className="w-full border rounded px-3 py-2"
+              name="name"
+              placeholder="ชื่อ-นามสกุล"
+              value={form.name}
+              onChange={onChange}
+              required
+            />
+            <input
+              className="w-full border rounded px-3 py-2"
+              name="email"
+              type="email"
+              placeholder="อีเมล"
+              value={form.email}
+              onChange={onChange}
+              required
+            />
+            <input
+              className="w-full border rounded px-3 py-2"
+              name="phone"
+              placeholder="เบอร์โทร"
+              value={form.phone}
+              onChange={onChange}
+            />
+            <textarea
+              className="w-full border rounded px-3 py-2"
+              name="address"
+              rows={3}
+              placeholder="ที่อยู่จัดส่ง"
+              value={form.address}
+              onChange={onChange}
+              required
+            />
+            <input
+              className="w-full border rounded px-3 py-2"
+              name="note"
+              placeholder="หมายเหตุ (ถ้ามี)"
+              value={form.note}
+              onChange={onChange}
+            />
+
+            {error && (
+              <p className="text-red-600 text-sm">Error: {error}</p>
+            )}
+
+            <button
+              className="btn-primary w-full"
+              type="submit"
+              disabled={sending || items.length === 0}
+            >
+              {sending ? "กำลังส่ง..." : "ส่งคำสั่งซื้อ"}
+            </button>
+          </form>
+        </section>
+      </div>
+    </main>
+  );
+}
+
