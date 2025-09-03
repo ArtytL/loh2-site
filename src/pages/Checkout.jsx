@@ -1,154 +1,148 @@
 // src/pages/Checkout.jsx
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
+import * as cart from "../lib/cart.js";
 
 export default function Checkout() {
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    address: "",
-    note: "",
-  });
-  const [cart, setCart] = useState([]);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [note, setNote] = useState("");
 
-  useEffect(() => {
-    // อ่านตะกร้าจาก localStorage
-    try {
-      const c = JSON.parse(localStorage.getItem("cart") || "[]");
-      setCart(c);
-    } catch (e) {
-      setCart([]);
-    }
-  }, []);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
 
-  const total = cart.reduce((s, i) => s + Number(i.price || 0) * Number(i.qty || 0), 0);
-  const shipping = cart.length ? 50 : 0;
-  const grand = total + shipping;
+  const items = cart.getItems();
+  const total = cart.getTotal();
 
-  function onChange(e) {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
-  }
-
-  async function submit(e) {
+  async function onSubmit(e) {
     e.preventDefault();
-
-    const payload = {
-      ...form,
-      cart,
-      shipping,
-      total: grand,
-    };
+    setError("");
+    setDone(false);
+    setSending(true);
 
     try {
+      const payload = {
+        name,
+        email,
+        phone,
+        address,
+        note,
+        cart: items,
+        total,
+      };
+
       const res = await fetch("/api/orders", {
         method: "POST",
-        headers: { "Content-Type": "text/plain" }, // ตรงกับฝั่ง server
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json().catch(() => ({}));
-      if (data?.ok) {
-        alert("ส่งคำสั่งซื้อเรียบร้อย");
-      } else {
-        alert("ส่งคำสั่งซื้อไม่สำเร็จ");
+
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(
+          `Server returned non-JSON (${res.status}). ${text.slice(0, 160)}`
+        );
       }
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      cart.clear();
+      setDone(true);
     } catch (err) {
-      console.error(err);
-      alert("ส่งคำสั่งซื้อไม่สำเร็จ");
+      setError(String(err.message || err));
+    } finally {
+      setSending(false);
     }
   }
 
   return (
-    <div className="container-max mx-auto px-4 py-8">
-      <h1 className="h1 mb-6">แจ้งโอน</h1>
+    <div className="container-max">
+      <h1 className="h1">แจ้งโอน</h1>
 
-      {/* สรุปรายการ */}
-      <div className="mb-8">
-        <table className="w-full text-left border-collapse">
+      {items.length === 0 ? (
+        <p>ตะกร้าว่าง</p>
+      ) : (
+        <table className="w-full mb-6">
           <thead>
-            <tr className="border-b">
-              <th className="py-2">ชื่อ</th>
-              <th className="py-2">ประเภท</th>
-              <th className="py-2 text-right">จำนวน</th>
-              <th className="py-2 text-right">ราคา</th>
+            <tr>
+              <th className="text-left">รหัส</th>
+              <th className="text-left">ชื่อ</th>
+              <th className="text-right">จำนวน</th>
+              <th className="text-right">ราคา</th>
             </tr>
           </thead>
           <tbody>
-            {cart.map((p) => (
-              <tr className="border-b" key={`${p.id}-${p.type || ""}`}>
-                <td className="py-2">{p.title}</td>
-                <td className="py-2">{p.type}</td>
-                <td className="py-2 text-right">{p.qty}</td>
-                <td className="py-2 text-right">{(Number(p.price) * Number(p.qty)).toLocaleString()}</td>
+            {items.map((it) => (
+              <tr key={it.id}>
+                <td>{it.id}</td>
+                <td>{it.title}</td>
+                <td className="text-right">{it.qty}</td>
+                <td className="text-right">{it.price}</td>
               </tr>
             ))}
+          </tbody>
+          <tfoot>
             <tr>
-              <td className="py-2" colSpan={3}>
-                รวมสินค้า
-              </td>
-              <td className="py-2 text-right">{total.toLocaleString()}</td>
-            </tr>
-            <tr>
-              <td className="py-2" colSpan={3}>
-                ค่าส่ง
-              </td>
-              <td className="py-2 text-right">{shipping.toLocaleString()}</td>
-            </tr>
-            <tr className="font-semibold">
-              <td className="py-2" colSpan={3}>
+              <td colSpan={3} className="text-right font-semibold">
                 รวมสุทธิ
               </td>
-              <td className="py-2 text-right">{grand.toLocaleString()}</td>
+              <td className="text-right font-semibold">{total}</td>
             </tr>
-          </tbody>
+          </tfoot>
         </table>
-      </div>
+      )}
 
-      {/* ฟอร์มลูกค้า */}
-      <form onSubmit={submit} className="space-y-3">
+      <form onSubmit={onSubmit} className="max-w-md space-y-3">
         <input
-          name="name"
-          value={form.name}
-          onChange={onChange}
+          className="input"
           placeholder="ชื่อ-นามสกุล"
-          className="w-full border rounded px-3 py-2"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
           required
         />
         <input
-          name="email"
-          value={form.email}
-          onChange={onChange}
+          className="input"
           placeholder="อีเมล"
-          className="w-full border rounded px-3 py-2"
           type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
           required
         />
         <input
-          name="phone"
-          value={form.phone}
-          onChange={onChange}
+          className="input"
           placeholder="เบอร์โทร"
-          className="w-full border rounded px-3 py-2"
-          required
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
         />
         <textarea
-          name="address"
-          value={form.address}
-          onChange={onChange}
+          className="input"
           placeholder="ที่อยู่จัดส่ง"
-          className="w-full border rounded px-3 py-2"
           rows={3}
-          required
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
         />
         <input
-          name="note"
-          value={form.note}
-          onChange={onChange}
+          className="input"
           placeholder="หมายเหตุ (ถ้ามี)"
-          className="w-full border rounded px-3 py-2"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
         />
-        <button type="submit" className="btn-primary w-full">
-          ส่งคำสั่งซื้อ
+
+        {error && (
+          <div className="text-red-600 text-sm whitespace-pre-wrap">
+            {error}
+          </div>
+        )}
+        {done && <div className="text-green-700">ส่งคำสั่งซื้อเรียบร้อย</div>}
+
+        <button className="btn-primary" disabled={sending || items.length === 0}>
+          {sending ? "กำลังส่ง..." : "ส่งคำสั่งซื้อ"}
         </button>
       </form>
     </div>
