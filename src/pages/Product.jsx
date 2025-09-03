@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { toImageURL, NO_IMAGE } from "../utils/imageTools.js";
-import { addToCart } from "../lib/cart.js";
+import * as cart from "../lib/cart.js";
 
 export default function Product() {
   const { id } = useParams();
@@ -10,8 +10,8 @@ export default function Product() {
 
   useEffect(() => {
     fetch("/api/products")
-      .then(r => r.json())
-      .then(d => (d.items || []).find(x => String(x.id) === String(id)))
+      .then((r) => r.json())
+      .then((d) => (d.items || []).find((x) => String(x.id) === String(id)))
       .then(setP)
       .catch(() => setP(null));
   }, [id]);
@@ -25,17 +25,28 @@ export default function Product() {
           <img
             src={toImageURL(p.cover) || NO_IMAGE}
             alt={p.title}
-            onError={e => { e.currentTarget.src = NO_IMAGE; }}
+            onError={(e) => {
+              e.currentTarget.src = NO_IMAGE;
+            }}
           />
         </div>
+
         <div>
           <h1 className="h1">{p.title}</h1>
           <div className="meta-line">{p.type}</div>
           <div className="price-xl">{p.price} บาท</div>
-          <button className="btn-primary" onClick={() => addToCart(p, 1)}>
+
+          <button
+            className="btn-primary"
+            onClick={() => cart.addToCart(p, 1)}
+            style={{ marginTop: 8 }}
+          >
             ใส่ตะกร้า
           </button>
-          <p className="desc" style={{ marginTop: 16 }}>{p.detail}</p>
+
+          <p className="desc" style={{ marginTop: 16 }}>
+            {p.detail}
+          </p>
         </div>
       </div>
     </div>
