@@ -1,153 +1,127 @@
-// /src/api/orders.js
-// ส่งคำสั่งซื้อ + ส่งอีเมลด้วย Resend
-import { Resend } from "resend";
+// /api/orders.js  (โฟลเดอร์รากของโปรเจ็กต์)
+// ไม่ต้องใช้ Resend SDK เพื่อเลี่ยงปัญหา import — เรียก REST API ตรง ๆ แทน
+export const config = { runtime: "nodejs", regions: ["sin1"] };
 
-export const config = { runtime: "nodejs" };
-
-// สร้างอินสแตนซ์ Resend จาก ENV
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-// สร้าง HTML อย่างง่ายสำหรับอีเมล
-function orderHtml({ name, email, phone, address, note, cart, total, shipping }) {
-  const rows = cart
-    .map(
-      (it) =>
-        `<tr>
-           <td>${it.title} (${it.type || "-"})</td>
-           <td align="right">${it.qty}</td>
-           <td align="right">${Number(it.price || 0).toLocaleString()}</td>
-           <td align="right">${(Number(it.qty) * Number(it.price || 0)).toLocaleString()}</td>
-         </tr>`
-    )
-    .join("");
-
-  return `
-  <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.6">
-    <h2>ยืนยันคำสั่งซื้อ</h2>
-    <p><b>ผู้สั่งซื้อ:</b> ${name}</p>
-    <p><b>อีเมล:</b> ${email}</p>
-    <p><b>โทร:</b> ${phone || "-"}</p>
-    <p><b>ที่อยู่:</b> ${address || "-"}</p>
-    <p><b>หมายเหตุ:</b> ${note || "-"}</p>
-    <table width="100%" cellspacing="0" cellpadding="6" border="1" style="border-collapse:collapse;border:1px solid #ddd">
-      <thead>
-        <tr style="background:#f6f6f6">
-          <th align="left">รายการ</th>
-          <th align="right">จำนวน</th>
-          <th align="right">ราคา</th>
-          <th align="right">รวม</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-      <tfoot>
-        <tr>
-          <td colspan="3" align="right"><b>ค่าส่ง</b></td>
-          <td align="right">${Number(shipping || 0).toLocaleString()}</td>
-        </tr>
-        <tr>
-          <td colspan="3" align="right"><b>รวมสุทธิ</b></td>
-          <td align="right"><b>${Number(total || 0).toLocaleString()}</b></td>
-        </tr>
-      </tfoot>
-    </table>
-    <p>ขอบคุณที่สั่งซื้อครับ</p>
-  </div>`;
-}
-
-export default async function handler(req, res) {
-  // CORS + Preflight
+function sendJson(res, status, data) {
+  res.status(status);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(204).end();
+  res.end(JSON.stringify(data));
+}
+
+export default async function handler(req, res) {
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.status(204).end();
+    return;
+  }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    return sendJson(res, 405, { error: "Only POST is allowed." });
   }
 
-  // อ่าน body JSON ให้ได้เสมอ (ทั้งกรณีเป็น string หรือ object)
-  let body = {};
+  // parse body (รองรับทั้งที่มาเป็น string และ object)
+  let body;
   try {
-    if (typeof req.body === "string") {
-      body = JSON.parse(req.body || "{}");
-    } else {
-      body = req.body || {};
-    }
-  } catch (e) {
-    return res.status(400).json({ ok: false, error: "Bad JSON" });
+    body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+  } catch {
+    return sendJson(res, 400, { error: "Invalid JSON body." });
   }
 
-  const { name, email, phone, address, note, cart, shipping = 50 } = body || {};
-
-  // ตรวจฟิลด์จำเป็น
-  if (!name || !email || !Array.isArray(cart) || cart.length === 0) {
-    return res
-      .status(400)
-      .json({ ok: false, error: "Missing fields: name, email, cart are required" });
-  }
-
-  // คำนวณรวม
-  const total =
-    cart.reduce(
-      (s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0),
-      0
-    ) + Number(shipping || 0);
-
-  // เตรียมข้อมูลเมล
-  const html = orderHtml({
+  const {
     name,
     email,
     phone,
     address,
-    note,
-    cart,
-    total,
-    shipping,
-  });
+    note = "",
+    cart,          // array ของสินค้า [{id,title,qty,price}, ...]
+    shipping = 50, // ถ้าไม่มีจะ default 50
+    total,         // ถ้ามีก็ใช้, ถ้าไม่มีก็จะคำนวณให้
+  } = body || {};
 
-  // ===== ตั้งค่าผู้ส่ง/ผู้รับ =====
-  // FROM: ถ้าคุณยังไม่ได้ verify domain ใน Resend ให้ใช้ fallback นี้ไปก่อน
-  const FROM = process.env.RESEND_FROM || "onboarding@resend.dev";
-  // ร้านจะได้รับสำเนาด้วย (ถ้าตั้งไว้)
-  const SHOP = process.env.ORDER_RECEIVER || "";
+  if (!name || !email || !Array.isArray(cart) || cart.length === 0) {
+    return sendJson(res, 400, {
+      error: "Missing fields: name, email, cart are required",
+    });
+  }
+
+  const itemsHtml = cart
+    .map(
+      (it) => `<tr>
+        <td>${it.id ?? ""}</td>
+        <td>${it.title ?? it.name ?? ""}</td>
+        <td style="text-align:right">${it.qty ?? 1}</td>
+        <td style="text-align:right">${it.price ?? 0}</td>
+      </tr>`
+    )
+    .join("");
+
+  const computedTotal =
+    total ??
+    cart.reduce((s, i) => s + (i.price || 0) * (i.qty || 1), 0) + (shipping || 0);
+
+  const html = `
+    <h2>คำสั่งซื้อใหม่</h2>
+    <p>
+      <b>ชื่อลูกค้า:</b> ${name}<br/>
+      <b>อีเมล:</b> ${email}<br/>
+      <b>โทร:</b> ${phone ?? ""}<br/>
+      <b>ที่อยู่:</b> ${address ?? ""}<br/>
+      <b>หมายเหตุ:</b> ${note || "-"}
+    </p>
+    <table border="1" cellspacing="0" cellpadding="6">
+      <thead><tr><th>รหัส</th><th>สินค้า</th><th>จำนวน</th><th>ราคา</th></tr></thead>
+      <tbody>${itemsHtml}</tbody>
+    </table>
+    <p>
+      <b>ค่าส่ง:</b> ${shipping || 0} บาท<br/>
+      <b>ยอดรวม:</b> ${computedTotal} บาท
+    </p>
+  `;
+
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) {
+    return sendJson(res, 500, { error: "Missing RESEND_API_KEY" });
+  }
+
+  const from = process.env.RESEND_FROM || "onboarding@resend.dev";
+  const to = [email];
+  if (process.env.ORDER_RECEIVER) to.push(process.env.ORDER_RECEIVER);
 
   try {
-    // ส่งถึงลูกค้า
-    await resend.emails.send({
-      from: FROM,                         // ต้องเป็นอีเมลบนโดเมนที่ verify แล้ว ถ้าไม่มีก็ใช้ onboarding@resend.dev
-      to: email,
-      subject: "ยืนยันคำสั่งซื้อ | โล๊ะมือสอง",
-      html,
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to,
+        subject: `คำสั่งซื้อใหม่จาก ${name}`,
+        html,
+      }),
     });
 
-    // ส่งสำเนาถึงร้าน (ถ้าตั้งค่า)
-    if (SHOP) {
-      await resend.emails.send({
-        from: FROM,
-        to: SHOP,
-        subject: `มีออเดอร์ใหม่จาก ${name}`,
-        html,
+    const json = await r.json();
+    if (!r.ok) {
+      // ส่ง error กลับให้เห็นชัด ๆ (ช่วยดีบัก 403/401/422 ได้)
+      return sendJson(res, 502, {
+        error: `Resend error ${r.status}`,
+        details: json,
       });
     }
 
-    return res.status(200).json({ ok: true, message: "Mail sent" });
+    return sendJson(res, 200, { ok: true, id: json.id || null });
   } catch (err) {
-    // แนบรายละเอียดเบื้องต้นเพื่อช่วยไล่ปัญหา
-    const msg =
-      err?.message ||
-      err?.response?.data?.message ||
-      "Send email failed";
-
-    // ถ้าเป็น Forbidden (403) ให้บอกสาเหตุที่พบบ่อย
-    const hint =
-      (err?.statusCode === 403 || String(err?.status).startsWith("403")) ?
-      "Resend 403: ตรวจสอบ RESEND_API_KEY และโดเมนของ FROM ต้อง Verified หรือใช้ onboarding@resend.dev ชั่วคราว" :
-      null;
-
-    return res.status(500).json({
-      ok: false,
-      error: `Resend error: ${msg}`,
-      hint,
+    return sendJson(res, 502, {
+      error: "Email send failed",
+      details: String(err),
     });
   }
 }
