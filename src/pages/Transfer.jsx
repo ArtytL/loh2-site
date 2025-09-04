@@ -1,20 +1,10 @@
-// src/pages/Transfer.jsx
-import React, { useEffect, useMemo, useState } from "react";
+// src/pages/Checkout.jsx
+// ฟอร์มเช็คเอาต์: ส่ง JSON ไปยัง /api/orders และแสดงผลลัพธ์
 
-function getCart() {
-  try {
-    return JSON.parse(localStorage.getItem("cart") || "[]");
-  } catch {
-    return [];
-  }
-}
-function setCart(items) {
-  localStorage.setItem("cart", JSON.stringify(items || []));
-  window.dispatchEvent(new CustomEvent("cart:changed"));
-}
+import React, { useState } from "react";
+import * as cart from "../lib/cart.js"; // ปรับ path ถ้า lib อยู่ที่อื่น
 
-export default function Transfer() {
-  const [items, setItems] = useState([]);
+export default function Checkout() {
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -23,173 +13,179 @@ export default function Transfer() {
     note: "",
   });
   const [sending, setSending] = useState(false);
-  const [done, setDone] = useState(false);
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    setItems(getCart());
-  }, []);
+  // ดึงรายการในตะกร้า + ยอดรวม
+  const items =
+    typeof cart.getItems === "function"
+      ? cart.getItems()
+      : typeof cart.items === "function"
+      ? cart.items()
+      : Array.isArray(cart.items)
+      ? cart.items
+      : [];
 
-  const shipping = 50;
-  const subtotal = useMemo(
-    () => items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0),
-    [items]
+  const count =
+    typeof cart.getCount === "function" ? cart.getCount() : items.length;
+
+  const subtotal = items.reduce(
+    (sum, it) => sum + Number(it.price || 0) * Number(it.qty || 1),
+    0
   );
+  const shipping = 50; // ปรับตามจริง
   const total = subtotal + shipping;
 
-  const onChange = (e) =>
-    setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    setForm((f) => ({ ...f, [name]: value }));
+  };
 
-  const onSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setMessage("");
     setSending(true);
-    setError("");
-
     try {
+      // เตรียม payload เป็น JSON
       const payload = {
-        ...form,
-        cart: items.map((i) => ({
-          id: i.id,
-          title: i.title,
-          type: i.type,
-          qty: i.qty,
-          price: i.price,
-        })),
-        shipping,
-        total,
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        address: form.address,
+        note: form.note,
+        cart: {
+          items: items,
+          shipping: shipping,
+        },
       };
 
-      const r = await fetch("/api/orders", {
+      // เรียก API /api/orders — ตรงนี้คือ “ฝั่งหน้าเว็บ”
+      const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      }).then((r) => r.json());
+      });
 
-      if (!r.ok) throw new Error(r.error || "ส่งคำสั่งซื้อไม่สำเร็จ");
-      setDone(true);
-      setCart([]); // เคลียร์ตะกร้า
+      // พยายามอ่านเป็น JSON เสมอ (ถ้าไม่ใช่ JSON จะโยน error พร้อมข้อความดิบ)
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(text || "Server did not return JSON");
+      }
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+
+      // สำเร็จ
+      setMessage(`ส่งคำสั่งซื้อสำเร็จ! เลขที่อีเมล: ${data.id || "-"}`);
+      // ล้างตะกร้า (ถ้ามีฟังก์ชัน)
+      if (typeof cart.clear === "function") cart.clear();
+      else if (typeof cart.reset === "function") cart.reset();
     } catch (err) {
-      setError(String(err.message || err));
+      setMessage(`Error: ${err.message}`);
     } finally {
       setSending(false);
     }
   };
 
-  if (done) {
-    return (
-      <main className="container-max mx-auto px-4 py-8">
-        <h1 className="h1 mb-6">ส่งคำสั่งซื้อแล้ว</h1>
-        <p>ขอบคุณครับ เราได้รับคำสั่งซื้อเรียบร้อยแล้ว กรุณาตรวจสอบอีเมลของคุณ</p>
-      </main>
-    );
-  }
-
   return (
-    <main className="container-max mx-auto px-4 py-8">
-      <h1 className="h1 mb-6">แจ้งโอน</h1>
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-6">ชำระเงิน / แจ้งโอน</h1>
 
-      <div className="grid lg:grid-cols-2 gap-8">
-        {/* สรุปรายการ */}
-        <section>
-          <h2 className="text-xl font-bold mb-3">สรุปรายการ</h2>
-          {items.length === 0 ? (
-            <p>ตะกร้าของคุณยังว่างอยู่</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2">สินค้า</th>
-                  <th className="text-right py-2">จำนวน</th>
-                  <th className="text-right py-2">ราคา</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it) => (
-                  <tr key={it.id} className="border-b">
-                    <td className="py-2">{it.title}</td>
-                    <td className="text-right py-2">{it.qty}</td>
-                    <td className="text-right py-2">
-                      {Number(it.price * it.qty).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td className="py-2">ค่าส่ง</td>
-                  <td />
-                  <td className="text-right py-2">{shipping.toLocaleString()}</td>
-                </tr>
-                <tr className="font-semibold">
-                  <td className="py-2">รวมสุทธิ</td>
-                  <td />
-                  <td className="text-right py-2">{total.toLocaleString()}</td>
-                </tr>
-              </tfoot>
-            </table>
-          )}
-        </section>
-
-        {/* ฟอร์มข้อมูลผู้รับ */}
-        <section>
-          <h2 className="text-xl font-bold mb-3">ข้อมูลผู้รับ</h2>
-
-          <form onSubmit={onSubmit} className="space-y-3">
-            <input
-              className="w-full border rounded px-3 py-2"
-              name="name"
-              placeholder="ชื่อ-นามสกุล"
-              value={form.name}
-              onChange={onChange}
-              required
-            />
-            <input
-              className="w-full border rounded px-3 py-2"
-              name="email"
-              type="email"
-              placeholder="อีเมล"
-              value={form.email}
-              onChange={onChange}
-              required
-            />
-            <input
-              className="w-full border rounded px-3 py-2"
-              name="phone"
-              placeholder="เบอร์โทร"
-              value={form.phone}
-              onChange={onChange}
-            />
-            <textarea
-              className="w-full border rounded px-3 py-2"
-              name="address"
-              rows={3}
-              placeholder="ที่อยู่จัดส่ง"
-              value={form.address}
-              onChange={onChange}
-              required
-            />
-            <input
-              className="w-full border rounded px-3 py-2"
-              name="note"
-              placeholder="หมายเหตุ (ถ้ามี)"
-              value={form.note}
-              onChange={onChange}
-            />
-
-            {error && (
-              <p className="text-red-600 text-sm">Error: {error}</p>
-            )}
-
-            <button
-              className="btn-primary w-full"
-              type="submit"
-              disabled={sending || items.length === 0}
-            >
-              {sending ? "กำลังส่ง..." : "ส่งคำสั่งซื้อ"}
-            </button>
-          </form>
-        </section>
+      {/* สรุปรายการสั้น ๆ */}
+      <div className="mb-6 p-4 rounded border">
+        <div className="flex justify-between text-sm">
+          <div>จำนวนสินค้า</div>
+          <div>{count} ชิ้น</div>
+        </div>
+        <div className="flex justify-between text-sm">
+          <div>ค่าสินค้า</div>
+          <div>{subtotal} บาท</div>
+        </div>
+        <div className="flex justify-between text-sm">
+          <div>ค่าส่ง</div>
+          <div>{shipping} บาท</div>
+        </div>
+        <div className="flex justify-between font-bold text-lg mt-2">
+          <div>รวมสุทธิ</div>
+          <div>{total} บาท</div>
+        </div>
       </div>
-    </main>
+
+      {/* ฟอร์มข้อมูลผู้รับ */}
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="block text-sm mb-1">ชื่อ-นามสกุล</label>
+          <input
+            className="w-full border rounded px-3 py-2"
+            name="name"
+            value={form.name}
+            onChange={onChange}
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-sm mb-1">อีเมล</label>
+          <input
+            className="w-full border rounded px-3 py-2"
+            name="email"
+            type="email"
+            value={form.email}
+            onChange={onChange}
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-sm mb-1">เบอร์โทร</label>
+          <input
+            className="w-full border rounded px-3 py-2"
+            name="phone"
+            value={form.phone}
+            onChange={onChange}
+          />
+        </div>
+        <div>
+          <label className="block text-sm mb-1">ที่อยู่จัดส่ง</label>
+          <textarea
+            className="w-full border rounded px-3 py-2"
+            name="address"
+            rows={3}
+            value={form.address}
+            onChange={onChange}
+          />
+        </div>
+        <div>
+          <label className="block text-sm mb-1">หมายเหตุ (ถ้ามี)</label>
+          <input
+            className="w-full border rounded px-3 py-2"
+            name="note"
+            value={form.note}
+            onChange={onChange}
+            placeholder="ระบุเวลาจัดส่ง ฯลฯ"
+          />
+        </div>
+
+        {/* แสดงข้อความผลลัพธ์ */}
+        {message && (
+          <div
+            className={`mt-3 text-sm ${
+              message.startsWith("Error:") ? "text-red-600" : "text-green-700"
+            }`}
+          >
+            {message}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={sending}
+          className="mt-4 inline-flex items-center justify-center px-5 py-2.5 rounded bg-black text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {sending ? "กำลังส่ง..." : "ส่งคำสั่งซื้อ"}
+        </button>
+      </form>
+    </div>
   );
 }
