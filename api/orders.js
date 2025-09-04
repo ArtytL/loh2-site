@@ -1,66 +1,50 @@
-// api/orders.js
-// Serverless Function ส่งอีเมลยืนยันคำสั่งซื้อด้วย Resend
-// วางไฟล์นี้ทับทั้งไฟล์ในโฟลเดอร์ /api ของโปรเจกต์
+// /api/orders.js
+// API ส่งอีเมลยืนยันคำสั่งซื้อด้วย Resend (REST) และตอบกลับเป็น JSON เสมอ
 
-import { Resend } from 'resend';
+export const config = { runtime: 'edge' }; // ทำงานบน Edge, ไม่ต้องติดตั้งแพ็กเกจเพิ่ม
 
-export const config = { runtime: 'nodejs' };
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-// ใช้ sender ชั่วคราวของ Resend เพื่อเลี่ยง 403 (ยังไม่ได้ verify domain)
-const FROM = 'Orders <onboarding@resend.dev>';
-
-// ---------- helper ----------
-function json(res, data, status = 200) {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.status(status).end(JSON.stringify(data));
+function headers() {
+  return {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
 }
-
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: headers() });
+}
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (m) => (
     { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]
   ));
 }
 
-// ---------- handler ----------
-export default async function handler(req, res) {
-  // CORS (เผื่อเรียกจากโดเมนอื่น)
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+export default async function handler(req) {
+  // CORS preflight
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: headers() });
+  if (req.method !== 'POST') return json({ ok:false, error:'Method Not Allowed' }, 405);
 
-  if (req.method === 'OPTIONS') {
-    res.status(204).end();
-    return;
-  }
-
-  if (req.method !== 'POST') {
-    return json(res, { ok: false, error: 'Method Not Allowed' }, 405);
-  }
-
-  // รับ body เป็น JSON
+  // รับ body (ต้องส่งแบบ JSON)
   let body;
   try {
-    body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    body = await req.json();
   } catch {
-    return json(res, { ok: false, error: 'Invalid JSON body' }, 400);
+    const raw = await req.text();
+    return json({ ok:false, error:'Invalid JSON body', raw }, 400);
   }
 
   const { name, email, phone, address, note, cart } = body || {};
-  if (!email || !cart) {
-    return json(res, { ok: false, error: 'Missing email or cart' }, 400);
-  }
+  if (!email || !cart) return json({ ok:false, error:'Missing email or cart' }, 400);
 
-  // รองรับได้ทั้ง cart เป็นอาเรย์ หรือมี field items
   const items = Array.isArray(cart) ? cart : (cart.items || []);
   const shipping = Number(cart.shipping ?? 50);
 
   let subtotal = 0;
   const rows = items.map((it, i) => {
-    const qty = Number(it.qty || 1);
+    const qty   = Number(it.qty || 1);
     const price = Number(it.price || 0);
-    const line = qty * price;
+    const line  = qty * price;
     subtotal += line;
     return `
       <tr>
@@ -99,22 +83,40 @@ export default async function handler(req, res) {
     </div>
   `;
 
-  try {
-    // ส่งถึงลูกค้า และถ้าอยากให้ร้านได้ซ้ำ ให้ตั้ง ENV: ORDER_NOTIFY_TO
-    await resend.emails.send({
-      from: FROM,
-      to: [email],
-      bcc: process.env.ORDER_NOTIFY_TO ? [process.env.ORDER_NOTIFY_TO] : undefined,
-      subject: `ยืนยันคำสั่งซื้อ – ยอดรวม ${total} บาท`,
-      html,
-    });
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  if (!RESEND_API_KEY) return json({ ok:false, error:'RESEND_API_KEY is not set' }, 500);
 
-    return json(res, { ok: true, total });
-  } catch (err) {
-    // ถ้าเจอ 403 มักเกิดจาก from ไม่ผ่าน verify → ใช้ onboarding@resend.dev ตามที่ตั้งไว้ด้านบน
-    return json(res, {
+  // ใช้ sender ชั่วคราวของ Resend เพื่อเลี่ยง 403 หากยังไม่ verify domain
+  const payload = {
+    from: 'Orders <onboarding@resend.dev>',
+    to: [email],
+    bcc: process.env.ORDER_NOTIFY_TO ? [process.env.ORDER_NOTIFY_TO] : undefined,
+    subject: `ยืนยันคำสั่งซื้อ – ยอดรวม ${total} บาท`,
+    html,
+  };
+
+  // เรียก REST API ของ Resend โดยตรง
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  // พยายาม parse เป็น JSON; ถ้าไม่ได้ก็ส่งข้อความดิบกลับ
+  const text = await r.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch { /* not json */ }
+
+  if (!r.ok) {
+    return json({
       ok: false,
-      error: `Resend error: ${err?.message || 'unknown'}`,
-    }, 500);
+      status: r.status,
+      error: data?.message || data?.error || text || `Resend HTTP ${r.status}`,
+    }, 502);
   }
+
+  return json({ ok: true, total, id: data?.id || null });
 }
